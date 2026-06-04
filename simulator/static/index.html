@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hoops LED Simulator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+      user-select: none;
+    }
+
+    header {
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0 16px;
+      border-bottom: 1px solid #1e1e2e;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .logo { display: flex; align-items: center; gap: 10px; }
+    .logo-sq {
+      width: 32px; height: 32px;
+      background: #ff6b35;
+      border-radius: 50%;
+      animation: pulse-sq 2s ease-in-out infinite;
+    }
+    @keyframes pulse-sq {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; background: #fe8000; }
+    }
+
+    h1 { font-size: 1.1rem; font-weight: 600; color: #ffb347; }
+
+    .stats { display: flex; gap: 20px; font-size: 0.78rem; color: #888; }
+    .stat-item { display: flex; flex-direction: column; align-items: center; }
+    .stat-value { font-size: 1rem; font-weight: 700; color: #ffb347; }
+    .stat-label { font-size: 0.65rem; text-transform: uppercase; }
+
+    #conn-badge {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.78rem; padding: 4px 10px;
+      border-radius: 20px; border: 1px solid #333; background: #111;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+    .dot.connected { background: #4caf50; }
+    .dot.disconnected { background: #f44336; }
+    .dot.connecting { background: #ff9800; animation: blink 0.8s ease-in-out infinite; }
+    @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.2; } }
+
+    .hoop-labels {
+      display: flex;
+      gap: 3px;
+      padding: 0 10px 8px;
+      max-width: 100%;
+    }
+    .hoop-label {
+      flex: 1;
+      text-align: center;
+      font-size: 0.7rem;
+      color: #666;
+      min-width: 60px;
+    }
+
+    .canvas-wrapper {
+      background: #06060c;
+      border: 1px solid #1a1a2e;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 0 60px rgba(255, 107, 53, 0.08);
+    }
+    canvas { display: block; cursor: pointer; border-radius: 4px; }
+
+    .hint {
+      margin-top: 10px;
+      font-size: 0.75rem;
+      color: #666;
+      text-align: center;
+    }
+
+    .controls {
+      width: 100%; max-width: 1200px;
+      display: flex; align-items: center; gap: 12px;
+      margin-top: 14px; flex-wrap: wrap;
+    }
+    button {
+      background: #1a1a2e; color: #ffb347;
+      border: 1px solid #5a3a1a; border-radius: 8px;
+      padding: 7px 16px; font-size: 0.8rem; cursor: pointer;
+    }
+    button:hover { background: #2a1808; border-color: #ff6b35; }
+    button.active { background: #ff6b35; color: #fff; }
+
+    #log {
+      width: 100%; max-width: 1200px;
+      background: #06060c; border: 1px solid #1a1a2e; border-radius: 8px;
+      padding: 8px 12px; font-family: monospace;
+      font-size: 0.72rem; color: #555; height: 56px;
+      overflow-y: auto; margin-top: 10px;
+    }
+    #log .entry.press { color: #ff6b35; }
+    #log .entry.frame { color: #2e7d32; }
+    #log .entry.error { color: #f44336; }
+
+    .tooltip {
+      position: absolute; background: rgba(0,0,0,0.85); color: #ffb347;
+      padding: 4px 10px; border-radius: 6px; font-size: 0.72rem;
+      pointer-events: none; display: none; z-index: 10;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-sq"></div>
+    <h1>Hoops LED Simulator</h1>
+  </div>
+  <div class="stats">
+    <div class="stat-item"><span class="stat-value" id="stat-fps">0</span><span class="stat-label">FPS</span></div>
+    <div class="stat-item"><span class="stat-value" id="stat-grid">—</span><span class="stat-label">Hoops</span></div>
+    <div class="stat-item"><span class="stat-value" id="stat-active">0</span><span class="stat-label">Lit</span></div>
+    <div class="stat-item"><span class="stat-value" id="stat-pressed">0</span><span class="stat-label">Shot</span></div>
+  </div>
+  <div id="conn-badge">
+    <div class="dot connecting" id="dot"></div>
+    <span id="conn-label">Connecting…</span>
+  </div>
+</header>
+
+<div class="canvas-wrapper">
+  <div class="hoop-labels" id="hoopLabels"></div>
+  <canvas id="boardCanvas"></canvas>
+  <div class="tooltip" id="tooltip"></div>
+</div>
+<p class="hint">Click a lit hoop backboard to simulate a made shot</p>
+
+<div class="controls">
+  <button id="btn-hold" onclick="toggleHold()">Hold mode: OFF</button>
+  <button onclick="clearPressed()">Clear shots</button>
+</div>
+
+<div id="log"></div>
+
+<script>
+const WS_URL = `ws://${location.host}/ws`;
+
+// Hoops = 1 row × N cols (each col = one hoop backboard)
+let ROWS = 1, COLS = 6;
+let CELL = 90, GAP = 8, GLOW_AMOUNT = 16;
+let holdMode = false;
+let grid = [], pressed = new Set(), pressedCount = 0, activeTiles = 0;
+
+const canvas = document.getElementById('boardCanvas');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+function resizeCanvas() {
+  canvas.width  = COLS * (CELL + GAP) + GAP + 20;
+  canvas.height = ROWS * (CELL + GAP) + GAP + 40;
+  updateHoopLabels();
+}
+
+function updateHoopLabels() {
+  const el = document.getElementById('hoopLabels');
+  el.innerHTML = '';
+  el.style.width = canvas.width + 'px';
+  for (let c = 0; c < COLS; c++) {
+    const d = document.createElement('div');
+    d.className = 'hoop-label';
+    d.style.width = (CELL + GAP) + 'px';
+    d.textContent = `Hoop ${c + 1}`;
+    el.appendChild(d);
+  }
+}
+
+function cellTopLeft(row, col) {
+  return { x: 10 + GAP + col * (CELL + GAP), y: 10 + GAP + row * (CELL + GAP) };
+}
+
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => Math.min(255, Math.max(0, v|0)).toString(16).padStart(2, '0')).join('');
+}
+
+function cellRGB(cell) {
+  if (!cell) return [0, 0, 0];
+  if (Array.isArray(cell[0])) {
+    const m = cell[1] || cell[0];
+    return [m[0]|0, m[1]|0, m[2]|0];
+  }
+  return [cell[0]|0, cell[1]|0, cell[2]|0];
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawFrame() {
+  if (!grid.length) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  activeTiles = 0;
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const [ri, gi, bi] = cellRGB((grid[r] || [])[c]);
+      const key = `${r},${c}`;
+      const isPressed = pressed.has(key);
+      const on = (ri + gi + bi) > 2;
+      if (on) activeTiles++;
+      const { x, y } = cellTopLeft(r, c);
+
+      if (on && GLOW_AMOUNT > 0) {
+        const cx = x + CELL / 2, cy = y + CELL / 2;
+        const glow = ctx.createRadialGradient(cx, cy, CELL * 0.1, cx, cy, CELL);
+        glow.addColorStop(0, `rgba(${ri},${gi},${bi},0.7)`);
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = glow;
+        ctx.fillRect(x - CELL * 0.5, y - CELL * 0.5, CELL * 2, CELL * 2);
+        ctx.restore();
+      }
+
+      ctx.fillStyle = on ? rgbToHex(ri, gi, bi) : '#0d0d18';
+      roundRect(x, y, CELL, CELL, 10);
+      ctx.fill();
+
+      ctx.strokeStyle = on ? 'rgba(255,255,255,0.15)' : '#1e1e35';
+      ctx.lineWidth = 2;
+      roundRect(x, y, CELL, CELL, 10);
+      ctx.stroke();
+
+      if (isPressed) {
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        roundRect(x, y, CELL, CELL, 10);
+        ctx.fill();
+      }
+
+      ctx.fillStyle = on ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.25)';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(c + 1), x + CELL / 2, y + CELL / 2);
+    }
+  }
+
+  document.getElementById('stat-active').textContent = activeTiles;
+  document.getElementById('stat-pressed').textContent = pressedCount;
+}
+
+let ws, reconnectTimer;
+function connect() {
+  clearTimeout(reconnectTimer);
+  setStatus('connecting');
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => logEntry('Connected', 'frame');
+  ws.onmessage = ({ data }) => {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.type === 'frame') {
+        ROWS = msg.rows; COLS = msg.cols; grid = msg.grid;
+        document.getElementById('stat-fps').textContent = msg.fps;
+        document.getElementById('stat-grid').textContent = `${COLS} hoops`;
+        resizeCanvas();
+        drawFrame();
+      }
+    } catch (e) {}
+  };
+  ws.onclose = () => { setStatus('disconnected'); reconnectTimer = setTimeout(connect, 2000); };
+}
+function sendMsg(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function pixelToCell(px, py) {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const { x, y } = cellTopLeft(r, c);
+      if (px >= x && px < x + CELL && py >= y && py < y + CELL) return [r, c];
+    }
+  return null;
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const hit = pixelToCell(e.clientX - rect.left, e.clientY - rect.top);
+  if (!hit) return;
+  const [r, c] = hit, key = `${r},${c}`;
+  if (holdMode) {
+    if (pressed.has(key)) {
+      pressed.delete(key); pressedCount--;
+      sendMsg({ type: 'release', row: r, col: c });
+    } else {
+      pressed.add(key); pressedCount++;
+      sendMsg({ type: 'press', row: r, col: c });
+      logEntry(`Shot hoop ${c + 1}`, 'press');
+    }
+  } else {
+    pressed.add(key); pressedCount++;
+    sendMsg({ type: 'press', row: r, col: c });
+    logEntry(`Shot hoop ${c + 1}`, 'press');
+  }
+  drawFrame();
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (holdMode) return;
+  const rect = canvas.getBoundingClientRect();
+  const hit = pixelToCell(e.clientX - rect.left, e.clientY - rect.top);
+  if (!hit) return;
+  const [r, c] = hit, key = `${r},${c}`;
+  if (pressed.has(key)) {
+    pressed.delete(key); pressedCount--;
+    sendMsg({ type: 'release', row: r, col: c });
+    drawFrame();
+  }
+});
+
+function toggleHold() {
+  holdMode = !holdMode;
+  const btn = document.getElementById('btn-hold');
+  btn.textContent = `Hold mode: ${holdMode ? 'ON' : 'OFF'}`;
+  btn.classList.toggle('active', holdMode);
+}
+function clearPressed() {
+  pressed.forEach(key => {
+    const [r, c] = key.split(',').map(Number);
+    sendMsg({ type: 'release', row: r, col: c });
+  });
+  pressed.clear(); pressedCount = 0; drawFrame();
+}
+function setStatus(s) {
+  document.getElementById('dot').className = 'dot ' + s;
+  document.getElementById('conn-label').textContent = s.charAt(0).toUpperCase() + s.slice(1);
+}
+const logEl = document.getElementById('log');
+function logEntry(msg, cls = 'entry') {
+  const d = document.createElement('div');
+  d.className = `entry ${cls}`;
+  d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.prepend(d);
+}
+
+resizeCanvas();
+connect();
+</script>
+</body>
+</html>

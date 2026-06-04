@@ -14,14 +14,15 @@ class Play:
     MAX_TIME = 3600
     
     def get_game_speed(self, game_level, leval_span):
+        game_level_speed = 1  # default — decompiler omitted this
         if game_level <= 1:
             game_level_speed = 1 - leval_span
             if game_level_speed < 0:
                 game_level_speed = 0.1
-            elif game_level == 2:
-                game_level_speed = 1
-            else:
-                game_level_speed = 1 + leval_span
+        elif game_level == 2:
+            game_level_speed = 1
+        else:
+            game_level_speed = 1 + leval_span
         return game_level_speed
 
     
@@ -47,271 +48,74 @@ class Play:
 
     
     def deal_all_direction(self, group):
-        ROW_MIN = group.activity_area[0][0]
-        ROW_MAX = group.activity_area[0][1] - 1
-        COL_MIN = group.activity_area[1][0]
-        COL_MAX = group.activity_area[1][1] - 1
-        last_into_edge = group.edge_run_into
-        set_cell = group.start_member
-        direction_last = group.direct
-        direction_current = direction_last
-        change = 1
-        (r, c) = (0, 1)
-        in_edge = False
-        out_edge = False
-        in_edge_col = False
-        max_out = 0
-        set_cell_current = set()
-        if direction_last == Setting.UP:
-            for cell in set_cell:
-                current_row = cell[r] - change
-                set_cell_current.add((current_row, cell[c]))
-                if current_row == ROW_MIN:
-                    in_edge = True
-                if current_row < ROW_MIN:
-                    out_edge = True
-            if in_edge:
-                if last_into_edge == Setting.BACK:
-                    direction_current = Setting.DOWN
-                elif last_into_edge == Setting.RIGHT:
-                    direction_current = Setting.RIGHT
-                elif last_into_edge == Setting.LEFT:
-                    direction_current = Setting.LEFT
-            if out_edge:
-                if last_into_edge == Setting.DISAPPEAR:
-                    direction_current = Setting.STATIC
-                    set_cell_current.clear()
-                elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                    for cell in set_cell_current.copy():
-                        if cell[r] < ROW_MIN:
-                            set_cell_current.remove(cell)
-                set_cell_current.clear()
-            elif direction_last == Setting.DOWN:
-                for cell in set_cell:
-                    current_row = cell[r] + change
-                    set_cell_current.add((current_row, cell[c]))
-                    if current_row == ROW_MAX:
-                        in_edge = True
-                    if current_row > ROW_MAX:
-                        out_edge = True
-                if in_edge:
-                    if last_into_edge == Setting.BACK:
-                        direction_current = Setting.UP
-                    elif last_into_edge == Setting.RIGHT:
-                        direction_current = Setting.LEFT
-                    elif last_into_edge == Setting.LEFT:
-                        direction_current = Setting.RIGHT
-                if out_edge:
-                    if last_into_edge == Setting.DISAPPEAR:
-                        direction_current = Setting.STATIC
-                        set_cell_current.clear()
-                    elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                        for cell in set_cell_current.copy():
-                            if cell[r] > ROW_MAX:
-                                set_cell_current.remove(cell)
-                    set_cell_current.clear()
-                elif direction_last == Setting.RIGHT:
-                    edge = COL_MAX
-                    for cell in set_cell:
-                        current_col = cell[c] + change
-                        set_cell_current.add((cell[r], current_col))
-                        if current_col == edge:
-                            in_edge = True
-                        if current_col > edge:
-                            out_edge = True
-                    if in_edge:
-                        if last_into_edge == Setting.BACK:
-                            direction_current = Setting.LEFT
-                        elif last_into_edge == Setting.RIGHT:
-                            direction_current = Setting.DOWN
-                        elif last_into_edge == Setting.LEFT:
-                            direction_current = Setting.UP
-                    if out_edge:
-                        if last_into_edge == Setting.DISAPPEAR:
-                            direction_current = Setting.STATIC
-                            set_cell_current.clear()
-                        elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                            for cell in set_cell_current.copy():
-                                if cell[c] > edge:
-                                    set_cell_current.remove(cell)
-                        set_cell_current.clear()
-                    elif direction_last == Setting.LEFT:
-                        edge = COL_MIN
-                        for cell in set_cell:
-                            current_col = cell[c] - change
-                            set_cell_current.add((cell[r], current_col))
-                            if current_col == edge:
-                                in_edge = True
-                            if current_col < edge:
-                                out_edge = True
-                        if in_edge:
-                            if last_into_edge == Setting.BACK:
-                                direction_current = Setting.RIGHT
-                            elif last_into_edge == Setting.RIGHT:
-                                direction_current = Setting.UP
-                            elif last_into_edge == Setting.LEFT:
-                                direction_current = Setting.DOWN
-                        if out_edge:
-                            if last_into_edge == Setting.DISAPPEAR:
-                                direction_current = Setting.STATIC
-                                set_cell_current.clear()
-                            elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                                for cell in set_cell_current.copy():
-                                    if cell[c] < edge:
-                                        set_cell_current.remove(cell)
-                            set_cell_current.clear()
-                        elif direction_last == Setting.LEFT_UP:
-                            edge_row = ROW_MIN
-                            edge_col = COL_MIN
-                            for cell in set_cell:
-                                cur_row = cell[r] - change
-                                cur_col = cell[c] - change
-                                set_cell_current.add((cur_row, cur_col))
-                                if cur_row == edge_row:
-                                    in_edge = True
-                                if cur_col == edge_col:
-                                    in_edge_col = True
-                                if not cur_row < edge_row:
-                                    if cur_col < edge_col:
-                                        out_edge = True
-                                    if in_edge:
-                                        if last_into_edge == Setting.BACK:
-                                            direction_current = Setting.RIGHT_DOWN
-                                        elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                            direction_current = Setting.LEFT_DOWN
-                            if in_edge_col:
-                                if last_into_edge == Setting.BACK:
-                                    direction_current = Setting.RIGHT_DOWN
-                                elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                    direction_current = Setting.RIGHT_UP
-                            if in_edge and in_edge_col:
-                                direction_current = Setting.RIGHT_DOWN
-                            if out_edge:
-                                if last_into_edge == Setting.DISAPPEAR:
-                                    direction_current = Setting.STATIC
-                                    set_cell_current.clear()
-                                elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                                    for cell in set_cell_current.copy():
-                                        if not cell[r] < edge_row:
-                                            if cell[c] < edge_col:
-                                                set_cell_current.remove(cell)
-                                        else:
-                                            set_cell_current.clear()
-                                    if direction_last == Setting.RIGHT_DOWN:
-                                        edge_row = ROW_MAX
-                                        edge_col = COL_MAX
-                                        for cell in set_cell:
-                                            cur_row = cell[r] + change
-                                            cur_col = cell[c] + change
-                                            set_cell_current.add((cur_row, cur_col))
-                                            if cur_row == edge_row:
-                                                in_edge = True
-                                            if cur_col == edge_col:
-                                                in_edge_col = True
-                                            if not cur_row > edge_row:
-                                                if cur_col > edge_col:
-                                                    out_edge = True
-                                                if in_edge:
-                                                    if last_into_edge == Setting.BACK:
-                                                        direction_current = Setting.LEFT_UP
-                                                    elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                        direction_current = Setting.RIGHT_UP
-                                        if in_edge_col:
-                                            if last_into_edge == Setting.BACK:
-                                                direction_current = Setting.LEFT_UP
-                                            elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                direction_current = Setting.LEFT_DOWN
-                                        if in_edge and in_edge_col:
-                                            direction_current = Setting.LEFT_UP
-                                        if out_edge:
-                                            if last_into_edge == Setting.DISAPPEAR:
-                                                direction_current = Setting.STATIC
-                                                set_cell_current.clear()
-                                            elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                                                for cell in set_cell_current.copy():
-                                                    if not cell[r] > edge_row:
-                                                        if cell[c] > edge_col:
-                                                            set_cell_current.remove(cell)
-                                                    else:
-                                                        set_cell_current.clear()
-                                                if direction_last == Setting.LEFT_DOWN:
-                                                    edge_row = ROW_MAX
-                                                    edge_col = COL_MIN
-                                                    for cell in set_cell:
-                                                        cur_row = cell[r] + change
-                                                        cur_col = cell[c] - change
-                                                        set_cell_current.add((cur_row, cur_col))
-                                                        if cur_row == edge_row:
-                                                            in_edge = True
-                                                        if cur_col == edge_col:
-                                                            in_edge_col = True
-                                                        if not cur_row > edge_row:
-                                                            if cur_col < edge_col:
-                                                                out_edge = True
-                                                            if in_edge:
-                                                                if last_into_edge == Setting.BACK:
-                                                                    direction_current = Setting.RIGHT_UP
-                                                                elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                                    direction_current = Setting.LEFT_UP
-                                                    if in_edge_col:
-                                                        if last_into_edge == Setting.BACK:
-                                                            direction_current = Setting.RIGHT_UP
-                                                        elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                            direction_current = Setting.RIGHT_DOWN
-                                                    if in_edge and in_edge_col:
-                                                        direction_current = Setting.RIGHT_UP
-                                                    if out_edge:
-                                                        if last_into_edge == Setting.DISAPPEAR:
-                                                            direction_current = Setting.STATIC
-                                                            set_cell_current.clear()
-                                                        elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                                                            for cell in set_cell_current.copy():
-                                                                if not cell[r] > edge_row:
-                                                                    if cell[c] < edge_col:
-                                                                        set_cell_current.remove(cell)
-                                                                else:
-                                                                    set_cell_current.clear()
-                                                            if direction_last == Setting.RIGHT_UP:
-                                                                edge_row = ROW_MIN
-                                                                edge_col = COL_MAX
-                                                                for cell in set_cell:
-                                                                    cur_row = cell[r] - change
-                                                                    cur_col = cell[c] + change
-                                                                    set_cell_current.add((cur_row, cur_col))
-                                                                    if cur_row == edge_row:
-                                                                        in_edge = True
-                                                                    if cur_col == edge_col:
-                                                                        in_edge_col = True
-                                                                    if not cur_row < edge_row:
-                                                                        if cur_col > edge_col:
-                                                                            out_edge = True
-                                                                        if in_edge:
-                                                                            if last_into_edge == Setting.BACK:
-                                                                                direction_current = Setting.LEFT_DOWN
-                                                                            elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                                                direction_current = Setting.RIGHT_DOWN
-                                                                if in_edge_col:
-                                                                    if last_into_edge == Setting.BACK:
-                                                                        direction_current = Setting.LEFT_DOWN
-                                                                    elif last_into_edge == Setting.RIGHT or last_into_edge == Setting.LEFT:
-                                                                        direction_current = Setting.LEFT_UP
-                                                                if in_edge and in_edge_col:
-                                                                    direction_current = Setting.LEFT_DOWN
-                                                                if out_edge:
-                                                                    if last_into_edge == Setting.DISAPPEAR:
-                                                                        direction_current = Setting.STATIC
-                                                                        set_cell_current.clear()
-                                                                    elif last_into_edge == Setting.SLOW_DISAPPEAR:
-                                                                        for cell in set_cell_current.copy():
-                                                                            if not cell[r] < edge_row:
-                                                                                if cell[c] > edge_col:
-                                                                                    set_cell_current.remove(cell)
-                                                                            else:
-                                                                                set_cell_current.clear()
-                                                                        set_cell_current = set_cell
-                                                                        return (direction_current, set_cell_current)
+        """Move group one step in group.direct, clipped to group.activity_area.
+        Returns (new_direction, new_start_member).
+        Ported from LED-Hex working implementation — replaces broken decompiled version.
+        """
+        direct = group.direct
 
-    
+        _DELTA = {
+            Setting.UP:         (-1,  0),
+            Setting.DOWN:       ( 1,  0),
+            Setting.LEFT:       ( 0, -1),
+            Setting.RIGHT:      ( 0,  1),
+            Setting.LEFT_UP:    (-1, -1),
+            Setting.RIGHT_UP:   (-1,  1),
+            Setting.LEFT_DOWN:  ( 1, -1),
+            Setting.RIGHT_DOWN: ( 1,  1),
+        }
+
+        _REVERSE = {
+            Setting.UP:         Setting.DOWN,
+            Setting.DOWN:       Setting.UP,
+            Setting.LEFT:       Setting.RIGHT,
+            Setting.RIGHT:      Setting.LEFT,
+            Setting.LEFT_UP:    Setting.RIGHT_DOWN,
+            Setting.RIGHT_DOWN: Setting.LEFT_UP,
+            Setting.LEFT_DOWN:  Setting.RIGHT_UP,
+            Setting.RIGHT_UP:   Setting.LEFT_DOWN,
+        }
+
+        if direct not in _DELTA:
+            return (direct, list(group.start_member) if group.start_member else [])
+
+        cells = list(group.start_member)
+        if not cells:
+            return (direct, [])
+
+        dr, dc = _DELTA[direct]
+        area = group.activity_area
+        row_from, row_to = area[0]
+        col_from, col_to = area[1]
+
+        def _in(nr, nc):
+            return row_from <= nr < row_to and col_from <= nc < col_to
+
+        moved = [(c[0] + dr, c[1] + dc) for c in cells]
+
+        # No edge hit: whole group advances rigidly.
+        if all(_in(nr, nc) for nr, nc in moved):
+            return (direct, moved)
+
+        # An edge is hit. Behavior depends on edge_run_into.
+        edge = getattr(group, "edge_run_into", Setting.BACK)
+
+        if edge in (Setting.DISAPPEAR, Setting.SLOW_DISAPPEAR):
+            # Cells leaving the area vanish; the rest advance.
+            kept = [(nr, nc) for nr, nc in moved if _in(nr, nc)]
+            return (direct, kept)
+
+        # BACK (and default): RIGID BOUNCE — reverse direction and move the
+        # whole pattern, preserving every cell (no width erosion). If the
+        # reversed move also overflows (pattern wider than area), just flip
+        # direction and hold position this frame.
+        ndirect = _REVERSE.get(direct, direct)
+        ndr, ndc = _DELTA.get(ndirect, (0, 0))
+        rmoved = [(c[0] + ndr, c[1] + ndc) for c in cells]
+        if all(_in(nr, nc) for nr, nc in rmoved):
+            return (ndirect, rmoved)
+        return (ndirect, cells)
+
     def group_in_time(self, start_time, end_time):
         tmp_total = self.total_pass
         if not tmp_total - start_time >= Play.ACCURACY:

@@ -1,5 +1,7 @@
 """
-Game Manager - Manages running Play instances and game state
+Game Manager - Hoops
+Manages running Play instances and game state for the Hoops LED hoop game.
+Headless: no tkinter GUI. Input via API (simulated "shot made" on a hoop column).
 """
 import uuid
 import threading
@@ -9,23 +11,116 @@ import os
 import shelve as _shelve
 from typing import Dict, Optional
 from loguru import logger
-from .config import GAME_TIMEOUT_SECONDS, MAX_CONCURRENT_GAMES
+from .config import GAME_TIMEOUT_SECONDS, MAX_CONCURRENT_GAMES, GAMES_ROOT
+
+# Mock hardware/network dependencies before importing game_play
+# These are not needed for headless game logic:
+# - tkinter: GUI (game_running.py imports tkinter.messagebox)
+# - encryption: hardware dongle check (yanqian.py checks connected pedrive at module level)
+# - led.led_control: hardware LED driver
+# - net: network communication
+import sys
+from unittest.mock import MagicMock
+
+# Mock ALL external dependencies (hardware, GUI, media, etc)
+# Standard approach: mock before any imports to prevent ModuleNotFoundError
+mocks = {
+    # GUI/Display
+    'tkinter': MagicMock(),
+    'tkinter.messagebox': MagicMock(),
+    'tkinter.font': MagicMock(),
+    'gui': MagicMock(),
+    'gui.app_gui': MagicMock(),
+    'gui.gui_debugging': MagicMock(),
+    'gui.gui_setting': MagicMock(),
+    'gui.language': MagicMock(),
+    'gui2': MagicMock(),
+    'gui2.gui_led_table_editor': MagicMock(),
+    'gui2.gui_led_canvas2': MagicMock(),
+    'gui2.gui_table_editor': MagicMock(),
+    'gui2.ui_player_setting': MagicMock(),
+    'gui2.ui_table': MagicMock(),
+    'gui2.gui_util': MagicMock(),
+    'ui_design': MagicMock(),
+    # Hardware
+    'serial': MagicMock(),
+    'serial.tools': MagicMock(),
+    'serial.tools.list_ports': MagicMock(),
+    'led': MagicMock(),
+    'led.led_control': MagicMock(),
+    'led.communication': MagicMock(),
+    'led.position_convert': MagicMock(),
+    'led.led_serial_thread': MagicMock(),
+    'led.led_control_c': MagicMock(),
+    'net': MagicMock(),
+    'socket': MagicMock(),
+    # Audio/Video
+    'pygame': MagicMock(),
+    'pygame.mixer': MagicMock(),
+    'audio_play': MagicMock(),
+    'audio_play.audio': MagicMock(),
+    'moviepy': MagicMock(),
+    'moviepy.editor': MagicMock(),
+    'cv2': MagicMock(),
+    # Input
+    'pynput': MagicMock(),
+    'pynput.keyboard': MagicMock(),
+    'pynput.mouse': MagicMock(),
+    # Encryption
+    'encryption': MagicMock(),
+    'encryption.yanqian': MagicMock(),
+    'rsa': MagicMock(),
+    'Crypto': MagicMock(),
+    'Crypto.Hash': MagicMock(),
+    'Crypto.Cipher': MagicMock(),
+    'Crypto.PublicKey': MagicMock(),
+    'Crypto.Signature': MagicMock(),
+    # Database
+    'mysql': MagicMock(),
+    'mysql.connector': MagicMock(),
+    # Image processing
+    'numpy': MagicMock(),
+    'PIL': MagicMock(),
+    'PIL.Image': MagicMock(),
+    'PIL.ImageTk': MagicMock(),
+}
+
+for mod_name, mock in mocks.items():
+    sys.modules[mod_name] = mock
 
 # Will import after config is set
 # from game_play.Play import Play
 
-# Real game settings live in the decompiled project's shelve DBs.
-_CLONE_ROOT = "/Users/apple/parallel-work/ledhexagon_clone"
-_LED_PARAM = f"{_CLONE_ROOT}/setting/led_parameter"
-_DEBUG_PARAM = f"{_CLONE_ROOT}/setting/debug_parameter"
+# Hoops scoreable colors (PLUS_ARR from model/setting.py).
+# Each lit hoop backboard column matching one of these → +1 on trigger.
+# 2P (.ledb): P1=blue (0,0,254), P2=orange (254,128,0).
+_HOOPS_COLOR_ARR = [
+    (254, 128, 0),   # orange  - primary 1P target color
+    (0, 0, 254),     # blue    - P1 in 2P levels
+    (254, 254, 0),   # yellow
+    (0, 254, 254),   # cyan
+    (254, 0, 254),   # magenta
+    (254, 254, 254), # white
+]
+_HOOPS_HAZARD_COLORS = {(254, 0, 0), (240, 0, 0)}  # RED variants
+
+# Settings from Hoops led_parameter shelve.
+_LED_PARAM  = str(GAMES_ROOT / "setting" / "led_parameter")
+_DEBUG_PARAM = str(GAMES_ROOT / "setting" / "debug_parameter")
 
 # Sensible fallbacks if the shelve can't be read.
 _SETTINGS_DEFAULTS = {
     "game_time_sec": 300.0,    # game_time_sw (min) * 60
-    "life_value": 20,          # life_value_sw  (starting HP)
-    "leval_span": 0.9,         # leval_span_sw  (speed span)
-    "tread_red_time": 0.01,    # debug: secs on red before life loss
-    "life_value_count_time": 1.2,  # debug: min secs between life losses
+    "life_value": 20,          # life_value_sw
+    "leval_span": 0.8,         # leval_span_sw
+    "tread_red_time": 0.01,
+    "life_value_count_time": 1.2,
+    "grid_rows": 1,            # value_high  — Hoops is 1 row (hoop strip)
+    "grid_cols": 6,            # value_width — up to 6 hoop columns
+    "blue_hide_max_time": 20.0,  # seconds before covered targets disappear
+    "scode_divide_person": False,
+    "scode_divide_time": False,
+    "player_num": 2,
 }
 
 _settings_cache = None
@@ -51,6 +146,24 @@ def load_real_settings() -> dict:
             ls = db.get("leval_span_sw")
             if ls is not None:
                 s["leval_span"] = float(ls)
+            vh = db.get("value_high")
+            if vh is not None:
+                s["grid_rows"] = int(float(vh))
+            vw = db.get("value_width")
+            if vw is not None:
+                s["grid_cols"] = int(float(vw))
+            dp = db.get("game_scode_divide_person")
+            if dp is not None:
+                s["scode_divide_person"] = bool(dp)
+            dt = db.get("game_scode_divide_time")
+            if dt is not None:
+                s["scode_divide_time"] = bool(dt)
+            pn = db.get("player_num_sw")
+            if pn is not None:
+                s["player_num"] = int(float(pn))
+            bh = db.get("blue_hide_max_time_sw")
+            if bh is not None:
+                s["blue_hide_max_time"] = float(bh)
         finally:
             db.close()
     except Exception as e:
@@ -72,6 +185,200 @@ def load_real_settings() -> dict:
     _settings_cache = s
     logger.info(f"Loaded real settings: {s}")
     return s
+
+
+def _build_level_sequence(start_level):
+    """Ordered list of level FILE PATHS from start_level to end of its series.
+    Hoops naming:
+      casual:  source/-/*.led     (001..010 etc)
+      level:   source/--/*.led    (14..24 etc)
+      dk:      source/---/*.ledb  (DK01..DK10, 2-player)
+    """
+    import glob as _glob
+    src = str(GAMES_ROOT)
+    sl = str(start_level or "001")
+    def _sort_key(p):
+        stem = os.path.basename(p).rsplit(".", 1)[0]
+        if stem.isdigit():
+            return (0, int(stem))
+        return (1, stem.lower())
+
+    if sl.upper().startswith("DK"):
+        files = sorted(_glob.glob(os.path.join(src, "source", "---", "*.ledb")), key=_sort_key)
+    elif os.path.isfile(os.path.join(src, "source", "--", f"{sl}.led")):
+        files = sorted(_glob.glob(os.path.join(src, "source", "--", "*.led")), key=_sort_key)
+    else:
+        files = sorted(_glob.glob(os.path.join(src, "source", "-", "*.led")), key=_sort_key)
+    if not files:
+        return []
+    # Start at the chosen level (match by filename stem).
+    start_idx = 0
+    for i, f in enumerate(files):
+        stem = os.path.basename(f).rsplit(".", 1)[0]
+        if stem == sl or stem.startswith(sl):
+            start_idx = i
+            break
+    return files[start_idx:]
+
+
+def _load_level_file(path):
+    """Load one .led/.ledb: unzip, find the main gameplay shelve (the one with
+    play_order=False; audio/anim dirs have play_order=True), return
+    (dict_group, game_obj) as in-memory objects. (None, None) on failure."""
+    import zipfile, tempfile, shelve
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with zipfile.ZipFile(path, 'r') as z:
+                z.extractall(tmpdir)
+            best_go = best_dg = None
+            for root, _, files in os.walk(tmpdir):
+                if not any(f.startswith("game_file") for f in files):
+                    continue
+                gf = os.path.join(root, "game_file")
+                if not os.path.exists(gf + ".dat"):
+                    continue
+                try:
+                    db = shelve.open(gf)
+                    go = db.get("para_key_game")
+                    dg = db.get("dict_group")
+                    db.close()
+                    if go is None or dg is None:
+                        continue
+                    if not getattr(go, "play_order", True):
+                        return dg, go          # main gameplay — done
+                    elif best_go is None:
+                        best_go, best_dg = go, dg
+                except Exception:
+                    continue
+            return best_dg, best_go
+    except Exception as e:
+        logger.warning(f"Could not load level file {path}: {e}")
+        return None, None
+
+
+class HeadlessLedTable:
+    """In-memory LED table — replaces tkinter LedTable for headless API operation.
+    Same interface as gui2/gui_led_table_editor.LedTable but zero GUI deps.
+    Ported from LED-Hex SimulatorLedTable.
+    """
+
+    def __init__(self, wall_light_arr_len: int, led_row: int, led_col: int):
+        self.led_row = led_row
+        self.led_col = led_col
+        self.row = led_row
+        self.col = led_col
+        # Floor LED colors: led_table[row][col] = [R, G, B]
+        self.led_table = [[[0, 0, 0] for _ in range(led_col)] for _ in range(led_row)]
+        # Tile press state: True = being stepped on
+        self._state_table = [[False] * led_col for _ in range(led_row)]
+        self.table_state = self._state_table   # shared ref
+        self.state_table = self._state_table   # alias (game_manager callback uses this)
+        self.state_2array = [[5] * led_col for _ in range(led_row)]
+        self.g_wall_has_been_tread_arr2 = [[False] * led_col for _ in range(led_row)]
+        # Wall arrays
+        self._wall_light_arr = [[0, 0, 0] for _ in range(wall_light_arr_len)]
+        self._wall_light_state_array = [False] * wall_light_arr_len
+        self._wall_screen_arr = [0] * wall_light_arr_len
+        # Per-tile scoring state
+        self.red_table = [[False] * led_col for _ in range(led_row)]
+        self.green_table = [[False] * led_col for _ in range(led_row)]
+        self.safe_table = [[False] * led_col for _ in range(led_row)]
+        self.deduct_table = [[False] * led_col for _ in range(led_row)]
+        self.plus_table = [[None] * led_col for _ in range(led_row)]
+        self.other_color_table = [[False] * led_col for _ in range(led_row)]
+        self.blue_table = [[False] * led_col for _ in range(led_row)]
+        self.tread_short_stay = [[None] * led_col for _ in range(led_row)]
+        self.goal_color = None
+        self.goal_color2 = None
+        self.safe_color = None
+        self.canvas = None
+        self.led_coors_click = [[0, 0], False]
+        self.led_coors_click_wall = [[0, 0], False]
+
+    # ── State table ────────────────────────────────────────────────────
+    def get_state_table(self):
+        return self._state_table
+
+    def get_state_2array(self):
+        return self.state_2array
+
+    def get_g_wall_has_been_tread_arr2(self):
+        return self.g_wall_has_been_tread_arr2
+
+    # ── Wall accessors ─────────────────────────────────────────────────
+    def get_wall_light_arr(self):
+        return self._wall_light_arr
+
+    def get_wall_light_state_array(self):
+        return self._wall_light_state_array
+
+    def get_wall_screen_arr(self):
+        return self._wall_screen_arr
+
+    # ── Color output ───────────────────────────────────────────────────
+    def set_color_table_by_set_cell(self, start_member, color) -> None:
+        c = list(color) if isinstance(color, (tuple, list)) else [0, 0, 0]
+        for cell in (start_member or []):
+            try:
+                r_idx, c_idx = int(round(cell[0])), int(round(cell[1]))
+                if 0 <= r_idx < self.led_row and 0 <= c_idx < self.led_col:
+                    self.led_table[r_idx][c_idx] = c[:]
+            except (IndexError, TypeError, ValueError):
+                pass
+
+    def set_table_color(self, table, color=None):
+        c = list(color) if isinstance(color, (tuple, list)) else [0, 0, 0]
+        for row in table:
+            for i in range(len(row)):
+                row[i] = c[:]
+
+    def redraw_led_table_default(self, line=0, draw_canvas=True):
+        pass  # no-op: game_manager reads led_table directly
+
+    def draw_led_color(self):
+        pass
+
+    def clear_led_table(self):
+        for r in range(self.led_row):
+            for c in range(self.led_col):
+                self.led_table[r][c] = [0, 0, 0]
+        for i in range(len(self._wall_light_arr)):
+            self._wall_light_arr[i] = [0, 0, 0]
+        self._wall_screen_arr = [0] * len(self._wall_light_arr)
+
+    def screen_mouse_click_state_get(self):
+        pass
+
+    # ── Input (press/release from simulator) ──────────────────────────
+    def press_cell(self, row: int, col: int):
+        if 0 <= row < self.led_row and 0 <= col < self.led_col:
+            self._state_table[row][col] = True
+
+    def release_cell(self, row: int, col: int):
+        if 0 <= row < self.led_row and 0 <= col < self.led_col:
+            self._state_table[row][col] = False
+
+    # ── tkinter-compat stubs ───────────────────────────────────────────
+    def pack(self, **kw): pass
+    def grid(self, **kw): pass
+    def update(self): pass
+    def update_idletasks(self): pass
+    def configure(self, **kw): pass
+    def config(self, **kw): pass
+    def destroy(self): pass
+    def bind(self, *a, **kw): pass
+    def unbind(self, *a, **kw): pass
+    def after(self, ms, func=None, *args):
+        import threading
+        if func:
+            t = threading.Timer(ms / 1000.0, func, args)
+            t.daemon = True
+            t.start()
+    def after_cancel(self, *a): pass
+    def winfo_width(self): return self.led_col * 44
+    def winfo_height(self): return self.led_row * 38
+    def get_canvas_table_size(self): return (self.led_row, self.led_col)
+
 
 def _normalize_rings(cell):
     """Normalize a led_table cell to 3 ring colors [[r,g,b],[r,g,b],[r,g,b]]
@@ -194,8 +501,26 @@ class GameInstance:
         self.result = None                          # 0 lose / 1 complete / 2 timeout
         self.max_life = _s["life_value"]           # 20 HP
         self.life = self.max_life
+        # Final-score normalization (game_scode_rule): divide raw score by
+        # player count and/or game-time (minutes). Applied at session end only;
+        # live `score` stays raw for display.
+        self._scode_divide_person = _s.get("scode_divide_person", True)
+        self._scode_divide_time = _s.get("scode_divide_time", True)
+        # Default 1 player; _setup_level bumps to 2 for actual 2P (DK) levels.
+        # (player_num_sw is the machine's max-player config, not per-game.)
+        self._player_num = 1
         self.last_life_loss_time = 0.0             # for life_value_count_time gate
         self._life_count_time = _s["life_value_count_time"]
+
+        # ── SESSION (5-min marathon) state ──────────────────────────────
+        # Score + lives persist across levels; session ends on life<=0 or
+        # timer<=0. Player picks a starting level; we marathon to series end.
+        self.session_start = None      # wall-clock when first level begins
+        self.level_sequence = []       # ordered list of level FILE PATHS
+        self.current_level_id = None   # e.g. "A005" (for frontend display)
+        self.levels_cleared = 0        # how many levels finished this session
+        self._session_over = False     # True -> stop the session loop
+        self._level_cleared = False    # True -> advance to next level
 
         self.current_state = {
             "score": 0,
@@ -209,9 +534,40 @@ class GameInstance:
             "led_display": [],
             "game_over": False,
             "game_over_reason": "",
-            "result": None
+            "result": None,
+            "current_level": None,
+            "levels_cleared": 0,
         }
         self.thread = None
+
+    def compute_final_score(self, raw_score):
+        """Leaderboard score normalization (faithful to game_scode_rule):
+          final = raw / player_count (if divide_person) / minutes (if divide_time)
+        game_time is in MINUTES (game_time_sw). Live display uses raw score;
+        this is only for the saved/leaderboard result."""
+        scode = float(raw_score)
+        if self._scode_divide_person and self._player_num:
+            scode /= self._player_num
+        if self._scode_divide_time:
+            minutes = self.game_time_sec / 60.0
+            if minutes > 0:
+                scode /= minutes
+        return round(scode, 2)
+
+    def reset_for_level(self):
+        """Clear PER-LEVEL board state before loading the next level.
+        Score, score2, life, session timer all PERSIST (not reset)."""
+        self.flashes = {}
+        self.scored_active = set()
+        self.scored_active2 = set()
+        self.pending_respawn = []
+        self.p2_next_cells = set()
+        self.goal_cells = set()
+        self.goal2_cells = set()
+        self.red_cells = set()
+        self.deduct_cells = set()
+        self.last_life_loss_time = 0.0
+        self._level_cleared = False
 
     def is_expired(self) -> bool:
         """Check if game timed out"""
@@ -238,22 +594,14 @@ class GameInstance:
             now = time.time()
             if now - self.last_life_loss_time >= self._life_count_time:
                 self.score -= 1
-                if self.score < 0:
-                    self.score = 0
-                if self.multiplayer:          # red hurts both players in 2P
+                if self.multiplayer:
                     self.score2 -= 1
-                    if self.score2 < 0:
-                        self.score2 = 0
                 self.life -= 1
                 self.last_life_loss_time = now
             return
-        # DEDUCT tile: penalty (-1 score, -1 life) then consume (edge-triggered).
         if (i, j) in self.deduct_cells and (i, j) not in self.scored_active:
             self.scored_active.add((i, j))
             self.score -= 1
-            if self.score < 0:
-                self.score = 0
-            self.life -= 1
             self._consume_cell(i, j)
             return
         in_p1 = (i, j) in self.goal_cells
@@ -292,10 +640,10 @@ class GameInstance:
 
     def _consume_cell(self, i, j):
         """Remove a stepped goal tile from its group(s) so it blanks.
-        2P (.ledb multiplayer): respawns after respawn_delay.
-        1P: follows native level timing — groups with staggered start_times
-        provide natural wave progression; no artificial respawn."""
-        reappear_at = time.time() + self.respawn_delay if self.multiplayer else None
+        No artificial respawn — consumed = gone (matches real game). Level
+        completes when all scoreable tiles cleared. Time-staggered waves
+        (groups with later start_times) provide natural progression."""
+        reappear_at = None  # respawn disabled — clear progression for 1P + 2P
         if self.dict_group:
             for g in self.dict_group.values():
                 sm = getattr(g, "start_member", None)
@@ -377,7 +725,7 @@ class GameManager:
             # Eagerly set multiplayer from file extension BEFORE the load
             # thread starts, so _consume_cell respawns correctly even if
             # a press arrives before the shelve is fully loaded (~7s).
-            _clone = "/Users/apple/parallel-work/ledhexagon_clone"
+            _clone = str(GAMES_ROOT)
             _ledb = os.path.join(_clone, "source", "---", f"{level}.ledb")
             if os.path.exists(_ledb):
                 game.multiplayer = True
@@ -401,117 +749,93 @@ class GameManager:
 
         def _run_game():
             try:
+                # Double-check: reinstall mocks in this thread
+                if 'serial' not in sys.modules:
+                    sys.modules['serial'] = MagicMock()
+                if 'led' not in sys.modules:
+                    sys.modules['led'] = MagicMock()
+                if 'led.led_control' not in sys.modules:
+                    sys.modules['led.led_control'] = MagicMock()
+
                 logger.info(f"Starting game loop: {game_id}")
                 game.running = True
 
-                # Import game modules
-                import shelve
-                import os
-                from game_play.Play import Play
-                from game_play.game_running import LedTable
-                from model.setting import Setting
-
-                # Initialize game components (16x26 grid from settings)
-                logger.debug(f"Initializing LED table for game {game_id}")
-                led_table = LedTable(wall_light_arr_len=100, led_row=16, led_col=26)
-
-                logger.debug(f"Creating Play instance for game {game_id}")
-                play = Play(led_table, game_level=game.level)
-
-                # Sweep speed scale (cells/sec = (1/group.speed) * game_level_speed).
-                # Lower = slower sweep. Tune per difficulty to match real game pace.
-                difficulty_speed = {"easy": 0.25, "normal": 0.4, "hard": 0.6}
-                play.game_level_speed = difficulty_speed.get(game.difficulty, 0.4)
-
-                # Try to load real game data from .led files
-                dict_group = None
-                game_obj = None
+                # Import game modules (with fallback to mock loop on import error)
+                Play = None
+                LedTable = None
+                Setting = None
                 try:
-                    import zipfile
-                    import tempfile
+                    logger.info(f"Importing game modules for {game_id}")
+                    import shelve
+                    import os
+                    from game_play.Play import Play
+                    from game_play.game_running import LedTable
+                    from model.setting import Setting
+                    logger.info(f"✓ Game modules imported")
+                except Exception as import_err:
+                    logger.warning(f"Game module import failed, using mock loop: {import_err}")
+                    import traceback
+                    logger.warning(f"Import traceback: {traceback.format_exc()}")
+                    Play = None
+                    LedTable = None
+                    Setting = None
+                    # If imports failed, force dict_group to None to skip to mock loop
+                    dict_group = None
 
-                    # Resolve level file across all buckets:
-                    #   Extra/*.led  → single-player test levels
-                    #   source/---/*.ledb → basic 2P
-                    #   source/--/*.led  → advanced 1P
-                    #   source/-/*.led   → pro 1P
-                    level_id = str(game.level) if game.level else "17"
-                    clone = "/Users/apple/parallel-work/ledhexagon_clone"
-                    candidates = [
-                        os.path.join(clone, "Extra",      f"{level_id}.led"),
-                        os.path.join(clone, "source", "---", f"{level_id}.ledb"),
-                        os.path.join(clone, "source", "--",  f"{level_id}.led"),
-                        os.path.join(clone, "source", "-",   f"{level_id}.led"),
-                    ]
-                    led_file = next((p for p in candidates if os.path.exists(p)), None)
+                # Initialize game components — always use HeadlessLedTable
+                # (never the mocked gui2 LedTable — that's MagicMock, comparisons fail)
+                _s = load_real_settings()
+                _rows = _s.get("grid_rows", 1)
+                _cols = _s.get("grid_cols", 6)
+                led_table = HeadlessLedTable(wall_light_arr_len=100, led_row=_rows, led_col=_cols)
+                logger.info(f"HeadlessLedTable ready: {led_table.led_row}x{led_table.led_col} (Hoops hoop strip)")
 
-                    if led_file:
-                        logger.debug(f"Loading game from .led file: {led_file}")
+                # Create mock settings object with required attributes
+                # Climb's Play.__init__ expects setting.leval_span.get(), setting.blue_hide_max_time.get(), etc.
+                class MockSetting:
+                    def __init__(self):
+                        class MockAttr:
+                            def get(self):
+                                return 0.9  # leval_span default
+                        self.leval_span = MockAttr()
+                        self.blue_hide_max_time = MockAttr()
+                        self.blue_hide_max_time.get = lambda: 5.0
+                        self.corner_line_start = MockAttr()
+                        self.corner_line_start.get = lambda: 0
 
-                        # Extract zip and load shelve database.
-                        # Both .led and .ledb use same structure: <id>/game_file.*
-                        with tempfile.TemporaryDirectory() as tmpdir:
-                            with zipfile.ZipFile(led_file, 'r') as z:
-                                z.extractall(tmpdir)
+                mock_setting = MockSetting()
 
-                            # Inner folder may be level_id or filename stem
-                            game_file_path = os.path.join(tmpdir, level_id, "game_file")
-                            if not os.path.exists(game_file_path + ".dat"):
-                                # Try walking to find it
-                                for root, _, files in os.walk(tmpdir):
-                                    if any(f.startswith("game_file") for f in files):
-                                        game_file_path = os.path.join(root, "game_file")
-                                        break
-                            if os.path.exists(game_file_path + ".dat"):
-                                db = shelve.open(game_file_path)
-                                dict_group = db.get("dict_group")
-                                game_obj = db.get("para_key_game")
-                                db.close()
+                # Create dummy callback (Play expects partial_fun_cb for UI updates)
+                def dummy_callback(*args, **kwargs):
+                    pass
 
-                                if dict_group and game_obj:
-                                    logger.info(f"✓ Loaded real game: level {level_id}, groups={len(dict_group) if isinstance(dict_group, dict) else '?'}")
-                                else:
-                                    logger.warning(f"Game data missing in level {level_id}: dict_group={bool(dict_group)}, game={bool(game_obj)}")
-                    else:
-                        logger.warning(f"Level file not found for: {level_id}")
+                # game_level: numeric difficulty (1=easy, 2=normal, 3=hard), not level ID
+                difficulty_map = {"easy": 1, "normal": 2, "hard": 3}
+                game_level_num = difficulty_map.get(game.difficulty, 2)  # default to normal
 
-                except Exception as load_err:
-                    logger.warning(f"Could not load .led file: {load_err}. Using mock loop.")
+                play = None
+                try:
+                    logger.debug(f"Creating Play instance for game {game_id}")
+                    play = Play(led_table, mock_setting, dummy_callback, game_level=game_level_num)
+                    # Sweep speed scale (cells/sec = (1/group.speed) * game_level_speed).
+                    # Lower = slower sweep. Tune per difficulty to match real game pace.
+                    difficulty_speed = {"easy": 0.25, "normal": 0.4, "hard": 0.6}
+                    play.game_level_speed = difficulty_speed.get(game.difficulty, 0.4)
+                except Exception as e:
+                    logger.warning(f"Play creation failed, using mock loop: {e}")
+                    play = None
 
+                # ── SESSION SETUP ────────────────────────────────────────────
+                # Build the level marathon sequence from the chosen start level
+                # to the end of its series (A001..A025 / B01..B31 / DK01..DK10).
                 game.play = play
-                game.led_table = led_table  # expose for press input
-                game.dict_group = dict_group  # for consume-on-hit
-                # Board length = max group end_time; board ends at min(board, session).
-                try:
-                    if dict_group:
-                        game.board_time_sec = max(
-                            (getattr(g, "end_time_sec", 0) for g in dict_group.values()),
-                            default=1e9)
-                except Exception:
-                    game.board_time_sec = 1e9
-                # Active play zone from the level (e.g. 5x9); guards input.
-                if game_obj is not None:
-                    try:
-                        game.zone = (
-                            int(getattr(game_obj, "zone_row_from", 0)),
-                            int(getattr(game_obj, "zone_row_to", 16)),
-                            int(getattr(game_obj, "zone_col_from", 0)),
-                            int(getattr(game_obj, "zone_col_to", 26)),
-                        )
-                        logger.info(f"Play zone: {game.zone}")
-                    except Exception:
-                        game.zone = None
-                # Set multiplayer EAGERLY from dict_group so _consume_cell
-                # schedules respawn even if press arrives before first callback frame.
-                if dict_group:
-                    game.multiplayer = any(
-                        getattr(g, "type", None) == Setting.SCREEN_LIGHT
-                        for g in dict_group.values()
-                    )
-                    if game.multiplayer:
-                        logger.info(f"Multiplayer level detected: {level_id}")
+                game.led_table = led_table          # expose for press input
+                game.session_start = time.time()
+                game.level_sequence = _build_level_sequence(game.level)
+                logger.info(f"Session: {len(game.level_sequence)} levels from "
+                            f"'{game.level}' (5-min marathon)")
 
-                game_start_time = time.time()
+                game_start_time = game.session_start  # legacy alias for mock loop
 
                 BLACK3 = [(0, 0, 0), (0, 0, 0), (0, 0, 0)]
 
@@ -528,10 +852,41 @@ class GameManager:
                     if not hasattr(g, "trigger_span_tm"):
                         g.trigger_span_tm = 0
 
-                if dict_group:
-                    for _g in dict_group.values():
+                def _setup_level(dg, go):
+                    """Configure game state for a freshly-loaded level. Score,
+                    score2, life, session timer all PERSIST (set elsewhere)."""
+                    game.dict_group = dg
+                    # Per-level board time = max group end_time.
+                    try:
+                        game.board_time_sec = max(
+                            (getattr(g, "end_time_sec", 0) for g in dg.values()),
+                            default=1e9)
+                    except Exception:
+                        game.board_time_sec = 1e9
+                    # Play zone (guards input).
+                    if go is not None:
                         try:
-                            _ensure_anim(_g)
+                            game.zone = (int(getattr(go, "zone_row_from", 0)),
+                                         int(getattr(go, "zone_row_to", 16)),
+                                         int(getattr(go, "zone_col_from", 0)),
+                                         int(getattr(go, "zone_col_to", 26)))
+                        except Exception:
+                            game.zone = None
+                    # Multiplayer: 2P levels have BOTH blue(P1) and orange(P2)
+                    # scoreable groups. Upgrade only (never override to False).
+                    _P1 = (0, 0, 254); _P2 = (254, 128, 0)
+                    has_p1 = has_p2 = False
+                    for g in dg.values():
+                        mc = _group_main_color(g.color)
+                        if mc == _P1: has_p1 = True
+                        elif mc == _P2: has_p2 = True
+                    if has_p1 and has_p2:
+                        game.multiplayer = True
+                        game._player_num = 2   # 2P: divide score by 2 players
+                    # Init breath/anim state for all groups.
+                    for g in dg.values():
+                        try:
+                            _ensure_anim(g)
                         except Exception:
                             pass
 
@@ -543,50 +898,54 @@ class GameManager:
                 frame_counter = {"n": 0}
 
                 def _frame_callback(play_self, dgroup, time_pass, total_pass):
+                    # total_pass is PER-LEVEL (reset each level). Session timing
+                    # is wall-clock from game.session_start.
                     try:
-                        # End conditions + result code (faithful to original):
-                        #   life<=0            -> result 0 (lose)
-                        #   total_pass>board   -> result 1 (board complete / win)
-                        #   session time up    -> result 2 (timeout)
+                        session_elapsed = time.time() - game.session_start
+
+                        # ── SESSION-END conditions (stop the whole marathon) ──
+                        #   life<=0          -> result 0 (out of lives)
+                        #   session timer up -> result 2 (5-min timeout)
                         if game.life <= 0:
+                            game._session_over = True
                             game.update_state(game_over_reason="out_of_life", result=0)
                             return False
-                        if total_pass > game.board_time_sec:
-                            game.update_state(game_over_reason="completed", result=1)
-                            return False
-                        if (not game.running) or game.is_expired() \
-                                or total_pass > game.game_time_sec:
+                        if (not game.running) or session_elapsed > game.game_time_sec:
+                            game._session_over = True
                             game.update_state(game_over_reason="timeout", result=2)
+                            return False
+                        # ── LEVEL-END by TIME (advance to next level) ──
+                        # board_time_sec = max group end_time. For short levels
+                        # this fires; long (600s) levels advance by all-cleared.
+                        if total_pass > game.board_time_sec:
+                            game._level_cleared = True
                             return False
 
                         grid = led_table.led_table
                         state = led_table.state_table
 
-                        # 1) Determine goal colors from indicators.
-                        #    goal_led  = P1; goal2_led = P2 (multiplayer only).
-                        for g in dgroup.values():
-                            gtype = getattr(g, "type", None)
-                            if not g.start_member:
-                                continue
-                            if not (g.start_time_sec <= total_pass <= g.end_time_sec):
-                                continue
-                            if gtype == Setting.WALL_LIGHT:
-                                game.goal_color = _group_main_color(g.color)
-                            elif gtype == Setting.SCREEN_LIGHT:
-                                game.goal2_color = _group_main_color(g.color)
-                                game.multiplayer = True
-
-                        # 2) CLASSIFY floor (normal_led) cells:
-                        #    - color == goal_color -> scoreable target
-                        #    - DEDUCT_COLOR         -> penalty + consume
-                        #    - red                  -> hazard (stays)
-                        #    - else                 -> decor (neutral)
-                        goal_cells = set()
+                        # ── HOOPS CLASSIFICATION ─────────────────────────────
+                        # 1×N hoop strip: each column is one backboard.
+                        # Scoreable = PLUS_ARR colors; RED/DEDUCT = penalty.
+                        goal_cells  = set()
                         goal2_cells = set()
-                        red_cells = set()
+                        red_cells   = set()
                         deduct_cells = set()
-                        gc = game.goal_color
-                        gc2 = game.goal2_color
+                        green_cells = set()   # safe platforms — shield from RED
+
+                        _P1_COLOR = (0, 0, 254)    # blue   (P1)
+                        _P2_COLOR = (254, 128, 0)  # orange (P2)
+                        _GREEN    = (0, 254, 0)    # safe platform (non-scoring)
+
+                        # ── PRIORITY OVERLAP RESOLUTION ──────────────────────
+                        # When multiple groups occupy the SAME cell, ONE wins by
+                        # rank: green(3) > red/deduct(2) > blue/orange/goal(1).
+                        # This gives each cell exactly ONE category + display
+                        # color, so a blue tile under a moving red reads red NOW
+                        # (and becomes scoreable again once red moves off it).
+                        #   cell_win[(i,j)] = (rank, category, rgb)
+                        cell_win = {}
+                        _scoreset = set(_HOOPS_COLOR_ARR)
                         for g in dgroup.values():
                             sm = getattr(g, "start_member", None)
                             if not sm:
@@ -596,42 +955,102 @@ class GameManager:
                             if not (g.start_time_sec <= total_pass <= g.end_time_sec):
                                 continue
                             mc = _group_main_color(g.color)
-                            is_deduct = _rgb_is_deduct(mc)
-                            # Goal color OVERRIDES red classification:
-                            # e.g. DK09 where P2 goal indicator = (254,0,0).
-                            # A tile that matches P1 or P2 goal color is scored,
-                            # not penalized, even if it looks red.
-                            is_p1_color = (gc is not None and mc == gc)
-                            is_p2_color = (gc2 is not None and mc == gc2)
-                            is_red = (not is_deduct and not is_p1_color
-                                      and not is_p2_color and _rgb_is_red(mc))
-                            is_goal = is_p1_color and not is_deduct
-                            is_goal2 = is_p2_color and not is_deduct
-                            same_color_2p = (is_goal and is_goal2)
+                            if mc == _GREEN:
+                                rank, cat = 3, "green"
+                            elif _rgb_is_deduct(mc):
+                                rank, cat = 2, "deduct"
+                            elif mc in _HOOPS_HAZARD_COLORS:
+                                rank, cat = 2, "red"
+                            elif game.multiplayer and mc == _P1_COLOR:
+                                rank, cat = 1, "p1"
+                            elif game.multiplayer and mc == _P2_COLOR:
+                                rank, cat = 1, "p2"
+                            elif (not game.multiplayer) and mc in _scoreset:
+                                rank, cat = 1, "goal"
+                            else:
+                                rank, cat = 0, "decor"
                             for cell in sm:
                                 ci = round(cell[0]); cj = round(cell[1])
                                 if not (0 <= ci < led_table.led_row and 0 <= cj < led_table.led_col):
                                     continue
-                                if is_deduct:
-                                    deduct_cells.add((ci, cj))
-                                elif is_red:
-                                    red_cells.add((ci, cj))
-                                elif same_color_2p:
-                                    # Checkerboard spatial split so each player
-                                    # has their own distinct tiles even when
-                                    # P1 and P2 share the same goal color (DK03).
-                                    if (ci + cj) % 2 == 0:
-                                        goal_cells.add((ci, cj))
-                                    else:
-                                        goal2_cells.add((ci, cj))
-                                elif is_goal:
-                                    goal_cells.add((ci, cj))
-                                elif is_goal2:
-                                    goal2_cells.add((ci, cj))
-                        game.goal_cells = goal_cells
+                                prev = cell_win.get((ci, cj))
+                                if prev is None or rank > prev[0]:
+                                    cell_win[(ci, cj)] = (rank, cat, mc)
+
+                        # Derive mutually-exclusive category sets from winners.
+                        for (ci, cj), (rank, cat, mc) in cell_win.items():
+                            if cat == "green":
+                                green_cells.add((ci, cj))
+                            elif cat == "deduct":
+                                deduct_cells.add((ci, cj))
+                            elif cat == "red":
+                                red_cells.add((ci, cj))
+                            elif cat == "p1" or cat == "goal":
+                                goal_cells.add((ci, cj))
+                            elif cat == "p2":
+                                goal2_cells.add((ci, cj))
+
+                        game.goal_cells  = goal_cells
                         game.goal2_cells = goal2_cells
-                        game.red_cells = red_cells
+                        game.red_cells   = red_cells
                         game.deduct_cells = deduct_cells
+
+                        # ── LEVEL COMPLETION ─────────────────────────────────
+                        # Count scoreable tiles remaining across ALL groups
+                        # (active + future waves). When all consumed → complete.
+                        # Scoreable: PLUS_ARR (1P) or blue+orange (2P). Green/red
+                        # /deduct are NEVER scoreable so don't block completion.
+                        _scoreable_colors = ({_P1_COLOR, _P2_COLOR} if game.multiplayer
+                                             else set(_HOOPS_COLOR_ARR))
+                        remaining_scoreable = 0
+                        for g in dgroup.values():
+                            if getattr(g, "type", None) != Setting.FLOOR_LIGHT:
+                                continue
+                            mc = _group_main_color(g.color)
+                            if mc in _scoreable_colors:
+                                sm = getattr(g, "start_member", None)
+                                if sm:
+                                    remaining_scoreable += len(sm)
+                        # Grace period (>1.5s) so level has time to spawn first wave.
+                        # All scoreable cleared -> LEVEL done -> ADVANCE to next
+                        # level (NOT game over). Score/life persist via instance.
+                        if total_pass > 1.5 and remaining_scoreable == 0:
+                            logger.info(f"Level cleared (all tiles): "
+                                        f"score={game.score}, score2={game.score2}, "
+                                        f"life={game.life}")
+                            game._level_cleared = True
+                            return False
+
+                        # AUTO-JUMP: scoreable remain but none active NOW (current
+                        # wave cleared, next wave is in the future). Skip dead time
+                        # by advancing total_pass to the next scoreable wave's start.
+                        # Mirrors real game's running_by_blue auto-jump.
+                        if total_pass > 1.5 and remaining_scoreable > 0 \
+                                and not goal_cells and not goal2_cells:
+                            next_start = None
+                            for g in dgroup.values():
+                                if getattr(g, "type", None) != Setting.FLOOR_LIGHT:
+                                    continue
+                                mc = _group_main_color(g.color)
+                                if mc not in _scoreable_colors:
+                                    continue
+                                sm = getattr(g, "start_member", None)
+                                if not sm:
+                                    continue
+                                st = g.start_time_sec
+                                if st > total_pass and (next_start is None or st < next_start):
+                                    next_start = st
+                            if next_start is not None:
+                                logger.debug(f"Auto-jump: {total_pass:.1f}s -> {next_start:.1f}s")
+                                play_self.total_pass = next_start
+                                game.last_life_loss_time = 0.0  # reset hazard gate
+
+                        # DEBUG: log tile classification every 60 frames
+                        if frame_counter["n"] % 60 == 0:
+                            logger.debug(f"Frame {frame_counter['n']}: goal={len(goal_cells)}, "
+                                         f"goal2={len(goal2_cells)}, red={len(red_cells)}, "
+                                         f"deduct={len(deduct_cells)}, remaining_scoreable={remaining_scoreable}, "
+                                         f"mp={game.multiplayer}")
 
                         # 2) SCORE pressed cells (type-aware). Drop scored marks
                         #    for goals that are no longer active so they can score
@@ -650,40 +1069,22 @@ class GameManager:
                                     if state[i][j]:
                                         game.try_score_cell(i, j)
 
-                        # 2) Build a SEPARATE display buffer (don't touch led_table).
-                        led_display = [_normalize_rings(cell)
-                                       for row in grid for cell in row]
+                        # 2) Build display buffer from the PRIORITY winner map so
+                        #    overlapping cells render the WINNING color (green >
+                        #    red/deduct > blue/orange), matching interaction.
+                        #    Single RGB per cell (Climb = square single-color).
                         cols = led_table.led_col
-
-                        # 2a) PULSE: shimmer goal-color tiles between 60-100%
-                        #     brightness using a sin-wave (1s period).
-                        #     LedGroup.breath() oscillates to 0 making tiles
-                        #     invisible — replaced with this approach.
-                        #     Decor tiles remain static (no pulse).
+                        rows = led_table.led_row
                         import math as _math
                         pulse = 0.60 + 0.40 * (0.5 + 0.5 * _math.sin(total_pass * _math.pi * 2))
-                        goal_cs = {gc, gc2} - {None}
-                        for g in dgroup.values():
-                            try:
-                                sm = getattr(g, "start_member", None)
-                                if not sm:
-                                    continue
-                                if not (g.start_time_sec <= total_pass <= g.end_time_sec):
-                                    continue
-                                mc = _group_main_color(g.color)
-                                if mc not in goal_cs:
-                                    continue
-                                orig_rings = (g.color
-                                              if isinstance(g.color[0], (list, tuple))
-                                              else [g.color] * 3)
-                                bc = [[int(ch * pulse) for ch in ring]
-                                      for ring in orig_rings]
-                                for cell in sm:
-                                    ci = round(cell[0]); cj = round(cell[1])
-                                    if 0 <= ci < led_table.led_row and 0 <= cj < cols:
-                                        led_display[ci * cols + cj] = bc
-                            except Exception:
-                                continue
+                        led_display = [[0, 0, 0] for _ in range(rows * cols)]
+                        for (ci, cj), (rank, cat, mc) in cell_win.items():
+                            idx = ci * cols + cj
+                            if cat in ("goal", "p1", "p2"):
+                                # scoreable tiles shimmer
+                                led_display[idx] = [int(ch * pulse) for ch in mc]
+                            else:
+                                led_display[idx] = [int(mc[0]), int(mc[1]), int(mc[2])]
 
                         # 2b) FLASH: stepped tiles blink white ~0.4s then vanish.
                         now = time.time()
@@ -694,18 +1095,21 @@ class GameManager:
                                 continue
                             fi, fj = cell
                             on = int(el / 0.1) % 2 == 0
-                            col = [255, 255, 255] if on else [0, 0, 0]
-                            led_display[fi * cols + fj] = [col[:], col[:], col[:]]
+                            led_display[fi * cols + fj] = [255, 255, 255] if on else [0, 0, 0]
 
                         game.update_state(
                             score=game.score,
                             score2=game.score2,
                             multiplayer=game.multiplayer,
-                            time_elapsed=total_pass,
-                            time_left=max(0, game.game_time_sec - total_pass),
+                            time_elapsed=session_elapsed,                       # SESSION elapsed
+                            time_left=max(0, game.game_time_sec - session_elapsed),  # SESSION countdown
                             life=game.life,
                             game_over=False,
                             led_display=led_display,
+                            grid_rows=led_table.led_row,
+                            grid_cols=led_table.led_col,
+                            current_level=game.current_level_id,
+                            levels_cleared=game.levels_cleared,
                         )
 
                         frame_counter["n"] += 1
@@ -720,47 +1124,81 @@ class GameManager:
                         logger.error(f"Frame callback error {game_id}: {cb_err}")
                         return False
 
-                # Run the REAL game loop. Play.running() moves groups (sweeping
-                # patterns), advances time, and fires _frame_callback each frame.
-                if dict_group:
-                    logger.info(f"Running real game logic via Play.running(): {game_id}")
-                    play.callback = _frame_callback
+                # ── SESSION LOOP ─────────────────────────────────────────────
+                # Marathon through level_sequence. Score + lives + 5-min timer
+                # persist across levels. Each level runs via Play.running() until
+                # the callback returns False (level cleared -> advance, or session
+                # over -> stop). End on life<=0, timer<=0, or sequence exhausted.
+                if play is None or not game.level_sequence:
+                    logger.warning(f"No Play object or empty level sequence; "
+                                   f"session cannot run: {game_id}")
+                    game.update_state(game_over=True, game_over_reason="no_levels",
+                                      time_left=0)
+                    game.running = False
+                    return
+
+                play.callback = _frame_callback
+                for lvl_path in game.level_sequence:
+                    if game._session_over or not game.running:
+                        break
+                    session_elapsed = time.time() - game.session_start
+                    if session_elapsed > game.game_time_sec or game.life <= 0:
+                        game._session_over = True
+                        break
+
+                    lvl_id = os.path.basename(lvl_path).rsplit(".", 1)[0]
+                    dg, go = _load_level_file(lvl_path)
+                    if not dg:
+                        logger.warning(f"Skipping unloadable level: {lvl_id}")
+                        continue
+
+                    game.current_level_id = lvl_id
+                    game.reset_for_level()      # clear board state (keep score/life)
+                    _setup_level(dg, go)        # dict_group, board_time, zone, mp, anim
+                    logger.info(f"▶ Level {lvl_id}: groups={len(dg)}, "
+                                f"mp={game.multiplayer}, board_time={game.board_time_sec}s, "
+                                f"score={game.score}, life={game.life}, "
+                                f"t_left={game.game_time_sec - session_elapsed:.0f}s")
+
+                    # Run this level. Blocks until callback returns False.
+                    play.running_state = True
+                    play.total_pass = 0
                     try:
-                        play.running(dict_group)
+                        play.running(dg)
                     except Exception as run_err:
-                        logger.error(f"Play.running() error: {run_err}", exc_info=True)
-                    # Loop exited -> game over
-                    game.update_state(game_over=True, time_left=0)
-                else:
-                    logger.debug(f"No game data, using mock loop: {game_id}")
-                    # Fallback mock loop
-                    frame_count = 0
-                    while game.running and not game.is_expired():
-                        try:
-                            elapsed = time.time() - game_start_time
-                            frame_count += 1
-                            score = max(0, int(elapsed * 10))
+                        import traceback
+                        logger.warning(f"Level {lvl_id} run error: {run_err}\n"
+                                       f"{traceback.format_exc()}")
+                        break
 
-                            game.update_state(
-                                score=score,
-                                time_elapsed=elapsed,
-                                time_left=max(0, 180 - elapsed),
-                                game_over=elapsed > 180
-                            )
+                    if game._level_cleared:
+                        game.levels_cleared += 1
+                        logger.info(f"✓ Level {lvl_id} cleared "
+                                    f"(total cleared={game.levels_cleared})")
+                    # else: session ended (life/timeout) — loop guard will exit.
 
-                            time.sleep(0.016)
-
-                            if frame_count % 60 == 0:
-                                logger.debug(f"Game {game_id}: score={score}, elapsed={elapsed:.1f}s")
-
-                        except Exception as frame_error:
-                            logger.error(f"Frame update error {game_id}: {frame_error}")
-                            break
-
+                # Session finished (timer/lives/sequence end).
+                game._session_over = True
+                final_reason = game.get_state().get("game_over_reason") or "session_end"
+                final_result = game.get_state().get("result")
+                if final_result is None:
+                    final_result = 1  # cleared the whole series within time
+                final_score = game.compute_final_score(game.score)
+                final_score2 = game.compute_final_score(game.score2)
+                logger.info(f"Session over: reason={final_reason}, "
+                            f"raw_score={game.score} -> final={final_score}, "
+                            f"raw_score2={game.score2} -> final2={final_score2}, "
+                            f"levels_cleared={game.levels_cleared}")
+                game.update_state(game_over=True, time_left=0,
+                                  game_over_reason=final_reason, result=final_result,
+                                  levels_cleared=game.levels_cleared,
+                                  final_score=final_score, final_score2=final_score2)
                 game.running = False
 
             except Exception as e:
-                logger.error(f"Game error {game_id}: {e}", exc_info=True)
+                import traceback
+                logger.error(f"Game error {game_id}: {e}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 game.running = False
                 game.update_state(
                     game_over=True,

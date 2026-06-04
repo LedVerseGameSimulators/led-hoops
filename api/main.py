@@ -6,10 +6,11 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
+import os
 from loguru import logger
 import datetime
 
-from .config import API_HOST, API_PORT, API_DEBUG, GAME_NAME
+from .config import API_HOST, API_PORT, API_DEBUG, GAME_NAME, GAMES_ROOT
 from .models import (
     LoginRequest, LoginResponse, PlayerInfo,
     StartGameRequest, StartGameResponse,
@@ -258,18 +259,18 @@ async def get_game_settings():
     import shelve
 
     try:
-        setting_path = "/Users/apple/parallel-work/ledhexagon_clone/setting/led_parameter"
+        setting_path = str(GAMES_ROOT / "setting" / "led_parameter")
         db = shelve.open(setting_path)
 
-        # Load LED layout and dimensions
-        wall_layout = db.get("wall_light_layout_real")
-        grid_dims = db.get("grid_dimensions")
+        vh = db.get("value_high")
+        vw = db.get("value_width")
+        grid_dims = {"rows": int(float(vh or 1)), "cols": int(float(vw or 6))}
 
         settings = {
             "success": True,
-            "wall_layout": str(wall_layout)[:100] if wall_layout else "16x26",
-            "grid_dims": grid_dims or {"rows": 16, "cols": 26},
-            "timeout_seconds": 180,
+            "wall_layout": str(db.get("wall_light_layout_real") or "")[:100],
+            "grid_dims": grid_dims,
+            "timeout_seconds": int(float(db.get("game_time_sw") or 5) * 60),
             "max_score": 1000
         }
 
@@ -289,30 +290,30 @@ async def get_game_settings():
 # ============= GAME LEVELS ENDPOINT =============
 @app.get("/levels")
 async def get_levels():
-    """All levels grouped into 4 categories. Fast — no shelve scan (dir+ext only).
+    """Hoops levels grouped by series.
 
     Categories:
-      extra    - Extra/*.led       (1P, test levels 17-26)
-      basic    - source/---/*.ledb (2P, DK/YCDK series)
-      advanced - source/--/*.led   (1P, YC series)
-      pro      - source/-/*.led    (1P, 00-16 large)
+      casual   - source/-/*.led    (001-011, 1P)
+      level    - source/--/*.led   (14-25, 1P)
+      dk       - source/---/*.ledb (DK01-DK10, 2P)
     """
-    import os, glob as _glob
+    import glob as _glob
 
-    clone = "/Users/apple/parallel-work/ledhexagon_clone"
+    src = str(GAMES_ROOT)
 
     BUCKETS = [
-        ("extra",    os.path.join(clone, "Extra", "*.led"),          False, "led"),
-        ("basic",    os.path.join(clone, "source", "---", "*.ledb"), True,  "ledb"),
-        ("advanced", os.path.join(clone, "source", "--", "*.led"),   False, "led"),
-        ("pro",      os.path.join(clone, "source", "-", "*.led"),    False, "led"),
+        ("casual", os.path.join(src, "source", "-",   "*.led"),  False, "led"),
+        ("level",  os.path.join(src, "source", "--",  "*.led"),  False, "led"),
+        ("dk",     os.path.join(src, "source", "---", "*.ledb"), True,  "ledb"),
     ]
 
     levels = []
     for bucket, pattern, multiplayer, ftype in BUCKETS:
         for f in sorted(_glob.glob(pattern)):
             stem = os.path.basename(f).rsplit(".", 1)[0]
-            display = f"Level {stem}" if stem.isdigit() else stem
+            display = stem if stem.upper().startswith("DK") else (
+                f"Level {int(stem)}" if stem.isdigit() else stem
+            )
             levels.append({
                 "id":          stem,
                 "name":        display,
