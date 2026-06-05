@@ -295,6 +295,31 @@ class HeadlessLedTable:
         self.led_coors_click = [[0, 0], False]
         self.led_coors_click_wall = [[0, 0], False]
 
+    def resize(self, led_row: int, led_col: int) -> None:
+        """Resize grid to match per-level dimensions (Hoops levels are often 1×5)."""
+        if led_row == self.led_row and led_col == self.led_col:
+            return
+        old_state = self._state_table
+        self.led_row = self.row = led_row
+        self.led_col = self.col = led_col
+        self.led_table = [[[0, 0, 0] for _ in range(led_col)] for _ in range(led_row)]
+        self._state_table = [[False] * led_col for _ in range(led_row)]
+        self.table_state = self._state_table
+        self.state_table = self._state_table
+        self.state_2array = [[5] * led_col for _ in range(led_row)]
+        self.g_wall_has_been_tread_arr2 = [[False] * led_col for _ in range(led_row)]
+        self.red_table = [[False] * led_col for _ in range(led_row)]
+        self.green_table = [[False] * led_col for _ in range(led_row)]
+        self.safe_table = [[False] * led_col for _ in range(led_row)]
+        self.deduct_table = [[False] * led_col for _ in range(led_row)]
+        self.plus_table = [[None] * led_col for _ in range(led_row)]
+        self.other_color_table = [[False] * led_col for _ in range(led_row)]
+        self.blue_table = [[False] * led_col for _ in range(led_row)]
+        self.tread_short_stay = [[None] * led_col for _ in range(led_row)]
+        for r in range(min(led_row, len(old_state))):
+            for c in range(min(led_col, len(old_state[0]))):
+                self._state_table[r][c] = old_state[r][c]
+
     # ── State table ────────────────────────────────────────────────────
     def get_state_table(self):
         return self._state_table
@@ -432,6 +457,95 @@ def _rgb_is_red(rgb):
     return rgb[0] >= 200 and rgb[1] < 80 and rgb[2] < 30
 
 
+_GREEN_COLOR = (0, 254, 0)
+_COVER_COLORS = _HOOPS_HAZARD_COLORS | {_GREEN_COLOR}
+
+
+def _hoops_apply_cover_disappear(dgroup, total_pass, blue_hide_max_time):
+    """Remove PLUS tiles hidden under red/green cover (Hoops disappear mode).
+
+    Faithful to gui_editor_game.color_cover_over_times_disappear — after
+    blue_hide_max_time seconds, scoreable cells overlapped by cover vanish."""
+    try:
+        from model.setting import Setting
+    except ImportError:
+        return
+
+    PLUS = set(_HOOPS_COLOR_ARR)
+    hide = float(blue_hide_max_time or 20.0)
+
+    scoreable_at = set()
+    for g in dgroup.values():
+        if getattr(g, "type", None) != Setting.FLOOR_LIGHT:
+            continue
+        mc = _group_main_color(g.color)
+        if mc not in PLUS:
+            continue
+        if not (g.start_time_sec <= total_pass <= g.end_time_sec):
+            continue
+        for cell in (g.start_member or []):
+            scoreable_at.add((round(cell[0]), round(cell[1])))
+    if not scoreable_at:
+        return
+
+    coors_list = set()
+    coors_list_red = set()
+    for g in dgroup.values():
+        if getattr(g, "type", None) != Setting.FLOOR_LIGHT:
+            continue
+        sm = g.start_member
+        if not sm:
+            continue
+        mc = _group_main_color(g.color)
+        is_static_cover = (
+            g.speed == 0
+            and mc in _COVER_COLORS
+            and g.start_time_sec + hide + 5 < total_pass < g.end_time_sec
+        )
+        for cell in sm:
+            ci, cj = round(cell[0]), round(cell[1])
+            if (ci, cj) not in scoreable_at:
+                continue
+            if is_static_cover:
+                coors_list_red.add((ci, cj))
+            else:
+                coors_list.add((ci, cj))
+    coors_all = coors_list | coors_list_red
+
+    cover_now = set()
+    for g in dgroup.values():
+        if getattr(g, "type", None) != Setting.FLOOR_LIGHT:
+            continue
+        if not (g.start_time_sec <= total_pass <= g.end_time_sec):
+            continue
+        mc = _group_main_color(g.color)
+        if mc in _HOOPS_HAZARD_COLORS or mc == _GREEN_COLOR:
+            for cell in (g.start_member or []):
+                cover_now.add((round(cell[0]), round(cell[1])))
+
+    for g in dgroup.values():
+        if getattr(g, "type", None) != Setting.FLOOR_LIGHT or g.speed != 0:
+            continue
+        mc = _group_main_color(g.color)
+        if mc not in PLUS:
+            continue
+        if not (g.start_time_sec + hide < total_pass < g.end_time_sec):
+            continue
+        sm = g.start_member
+        if not sm:
+            continue
+        for cell in list(sm):
+            ci, cj = round(cell[0]), round(cell[1])
+            if (ci, cj) in cover_now and (ci, cj) in coors_all:
+                try:
+                    if isinstance(sm, set):
+                        sm.discard((ci, cj))
+                    else:
+                        sm.remove((ci, cj))
+                except (KeyError, ValueError, TypeError):
+                    pass
+
+
 class HeadlessGameGUI:
     """Mock GUI parent for Play.running_new() - provides LED update callback"""
 
@@ -509,8 +623,11 @@ class GameInstance:
         # Default 1 player; _setup_level bumps to 2 for actual 2P (DK) levels.
         # (player_num_sw is the machine's max-player config, not per-game.)
         self._player_num = 1
-        self.last_life_loss_time = 0.0             # for life_value_count_time gate
+        self.last_life_loss_time = 0.0             # legacy global gate
+        self._cell_red_penalty_at = {}             # per-cell red penalty timing
         self._life_count_time = _s["life_value_count_time"]
+        self._blue_hide_max_time = _s.get("blue_hide_max_time", 20.0)
+        self.green_cells = set()                   # shield from red (updated each frame)
 
         # ── SESSION (5-min marathon) state ──────────────────────────────
         # Score + lives persist across levels; session ends on life<=0 or
@@ -567,6 +684,8 @@ class GameInstance:
         self.red_cells = set()
         self.deduct_cells = set()
         self.last_life_loss_time = 0.0
+        self._cell_red_penalty_at.clear()
+        self.green_cells = set()
         self._level_cleared = False
 
     def is_expired(self) -> bool:
@@ -591,13 +710,17 @@ class GameInstance:
         # Red hazard: penalty + HP loss (gated). Not edge-limited by
         # scored_active (standing on red keeps hurting, rate-limited by time).
         if (i, j) in self.red_cells:
+            # Green shields from red (gui_editor_game: not green_table[i][j]).
+            if (i, j) in self.green_cells:
+                return
             now = time.time()
-            if now - self.last_life_loss_time >= self._life_count_time:
+            last = self._cell_red_penalty_at.get((i, j), 0.0)
+            if now - last >= self._life_count_time:
                 self.score -= 1
                 if self.multiplayer:
                     self.score2 -= 1
                 self.life -= 1
-                self.last_life_loss_time = now
+                self._cell_red_penalty_at[(i, j)] = now
             return
         if (i, j) in self.deduct_cells and (i, j) not in self.scored_active:
             self.scored_active.add((i, j))
@@ -792,16 +915,17 @@ class GameManager:
 
                 # Create mock settings object with required attributes
                 # Climb's Play.__init__ expects setting.leval_span.get(), setting.blue_hide_max_time.get(), etc.
+                _s_boot = load_real_settings()
                 class MockSetting:
                     def __init__(self):
                         class MockAttr:
+                            def __init__(self, val):
+                                self._val = val
                             def get(self):
-                                return 0.9  # leval_span default
-                        self.leval_span = MockAttr()
-                        self.blue_hide_max_time = MockAttr()
-                        self.blue_hide_max_time.get = lambda: 5.0
-                        self.corner_line_start = MockAttr()
-                        self.corner_line_start.get = lambda: 0
+                                return self._val
+                        self.leval_span = MockAttr(_s_boot.get("leval_span", 0.8))
+                        self.blue_hide_max_time = MockAttr(_s_boot.get("blue_hide_max_time", 20.0))
+                        self.corner_line_start = MockAttr(0)
 
                 mock_setting = MockSetting()
 
@@ -863,17 +987,30 @@ class GameManager:
                             default=1e9)
                     except Exception:
                         game.board_time_sec = 1e9
+                    lr = led_table.led_row
+                    lc = led_table.led_col
+                    if go is not None:
+                        try:
+                            lr = max(1, int(getattr(go, "row", lr)))
+                            lc = max(1, int(getattr(go, "col", lc)))
+                            led_table.resize(lr, lc)
+                            if play is not None:
+                                play.obj_led_table = led_table
+                        except Exception:
+                            lr = led_table.led_row
+                            lc = led_table.led_col
                     # Play zone (guards input).
                     if go is not None:
                         try:
                             game.zone = (int(getattr(go, "zone_row_from", 0)),
-                                         int(getattr(go, "zone_row_to", 16)),
+                                         int(getattr(go, "zone_row_to", lr)),
                                          int(getattr(go, "zone_col_from", 0)),
-                                         int(getattr(go, "zone_col_to", 26)))
+                                         int(getattr(go, "zone_col_to", lc)))
                         except Exception:
                             game.zone = None
-                    # Multiplayer: 2P levels have BOTH blue(P1) and orange(P2)
-                    # scoreable groups. Upgrade only (never override to False).
+                    # Multiplayer: detect per level (DK .ledb has blue + orange).
+                    game.multiplayer = False
+                    game._player_num = 1
                     _P1 = (0, 0, 254); _P2 = (254, 128, 0)
                     has_p1 = has_p2 = False
                     for g in dg.values():
@@ -882,7 +1019,7 @@ class GameManager:
                         elif mc == _P2: has_p2 = True
                     if has_p1 and has_p2:
                         game.multiplayer = True
-                        game._player_num = 2   # 2P: divide score by 2 players
+                        game._player_num = 2
                     # Init breath/anim state for all groups.
                     for g in dg.values():
                         try:
@@ -923,6 +1060,10 @@ class GameManager:
 
                         grid = led_table.led_table
                         state = led_table.state_table
+
+                        # Hoops: hide scoreable tiles under prolonged red/green cover.
+                        _hoops_apply_cover_disappear(
+                            dgroup, total_pass, game._blue_hide_max_time)
 
                         # ── HOOPS CLASSIFICATION ─────────────────────────────
                         # 1×N hoop strip: each column is one backboard.
@@ -994,6 +1135,7 @@ class GameManager:
                         game.goal2_cells = goal2_cells
                         game.red_cells   = red_cells
                         game.deduct_cells = deduct_cells
+                        game.green_cells = green_cells
 
                         # ── LEVEL COMPLETION ─────────────────────────────────
                         # Count scoreable tiles remaining across ALL groups
