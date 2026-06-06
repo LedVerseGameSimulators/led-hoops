@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API_URL = 'http://localhost:8000'
+import { API_URL } from '../config'
 
 const CAT_LABEL = {
   casual: { label: 'Casual', desc: '001–011 (1P)' },

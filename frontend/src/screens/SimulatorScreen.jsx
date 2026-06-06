@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 
-const API_URL = 'http://localhost:8000'
+import { API_URL, WS_BRIDGE_URL } from '../config'
 
 /** 2P when settings, login, or DK level say so (cardId2 is the strongest signal). */
 function effectivePlayerCount(config) {
@@ -277,7 +277,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
       <div className="simulator-content">
         <iframe
           ref={iframeRef}
-          src="http://localhost:8765"
+          src={WS_BRIDGE_URL}
           style={{ width: '100%', height: '100%', border: 'none' }}
           title="Game Simulator"
         />

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Start all Hoops dev services: API (8000), ws_bridge (8765), frontend (5173).
+# Start Hoops dev stack (API 8000, ws_bridge 8765, UI 5173).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+export API_PORT=8000
+export WS_BRIDGE_PORT=8765
+UI_PORT=5173
 
 kill_port() {
   local port=$1
@@ -18,32 +22,32 @@ kill_port() {
 }
 
 echo "==> Hoops dev stack from $ROOT"
-kill_port 8000
-kill_port 8765
-kill_port 5173
+kill_port "$API_PORT"
+kill_port "$WS_BRIDGE_PORT"
+kill_port "$UI_PORT"
 
-echo "==> API :8000"
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --loop asyncio &
+echo "==> API :$API_PORT"
+uvicorn api.main:app --host 0.0.0.0 --port "$API_PORT" --loop asyncio &
 API_PID=$!
 
-echo "==> ws_bridge :8765"
+echo "==> ws_bridge :$WS_BRIDGE_PORT"
 python3 ws_bridge.py &
 WS_PID=$!
 
-echo "==> frontend :5173"
+echo "==> frontend :$UI_PORT"
 cd frontend && npm run dev &
 UI_PID=$!
 
 cleanup() {
-  echo "Stopping..."
+  echo "Stopping Hoops stack..."
   kill $API_PID $WS_PID $UI_PID 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
 echo ""
-echo "Ready:"
-echo "  UI:        http://localhost:5173"
-echo "  API:       http://localhost:8000"
-echo "  ws_bridge: http://localhost:8765"
-echo "Press Ctrl+C to stop all."
+echo "Hoops ready:"
+echo "  UI:        http://localhost:$UI_PORT"
+echo "  API:       http://localhost:$API_PORT"
+echo "  ws_bridge: http://localhost:$WS_BRIDGE_PORT"
+echo "Press Ctrl+C to stop."
 wait
