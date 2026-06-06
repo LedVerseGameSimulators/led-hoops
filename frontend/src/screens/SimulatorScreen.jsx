@@ -2,6 +2,14 @@ import { useEffect, useState, useRef } from 'react'
 
 const API_URL = 'http://localhost:8000'
 
+/** 2P when settings, login, or DK level say so (cardId2 is the strongest signal). */
+function effectivePlayerCount(config) {
+  if (config.cardId2) return 2
+  if ((config.playerCount || 1) >= 2) return 2
+  if (String(config.level || '').toUpperCase().startsWith('DK')) return 2
+  return config.playerCount || 1
+}
+
 export default function SimulatorScreen({ config, onGameEnd }) {
   const [gameState, setGameState] = useState(null)
   const [gameId, setGameId] = useState(null)
@@ -15,6 +23,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
   // Audio: synth beeps via Web Audio (no asset files needed)
   const audioCtxRef = useRef(null)
   const prevScoreRef = useRef(0)
+  const prevScore2Ref = useRef(0)
   const prevLifeRef = useRef(null)
 
   const beep = (freq, durMs, type = 'sine', gain = 0.15) => {
@@ -39,13 +48,6 @@ export default function SimulatorScreen({ config, onGameEnd }) {
 
   // Start game on mount (or resume an already-running game after reload)
   useEffect(() => {
-    // Resuming: backend game already exists, don't start a new one.
-    if (config.resumeGameId) {
-      setGameId(config.resumeGameId)
-      gameIdRef.current = config.resumeGameId
-      setLoading(false)
-      return
-    }
     const startGame = async () => {
       try {
         const response = await fetch(`${API_URL}/start-game`, {
@@ -54,7 +56,8 @@ export default function SimulatorScreen({ config, onGameEnd }) {
           body: JSON.stringify({
             card_id: config.cardId,
             level: config.level || '17',
-            difficulty: config.difficulty || 'normal'
+            difficulty: config.difficulty || 'normal',
+            player_count: effectivePlayerCount(config),
           })
         })
         const data = await response.json()
@@ -69,7 +72,30 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         setError(err.message)
       }
     }
-    startGame()
+
+    const resumeOrStart = async () => {
+      if (!config.resumeGameId) {
+        await startGame()
+        return
+      }
+      // Resume only if backend already has 2P scoring when this session expects it.
+      try {
+        const want2P = effectivePlayerCount(config) >= 2
+        const res = await fetch(`${API_URL}/game-state/${config.resumeGameId}`)
+        const data = await res.json()
+        if (data.success && (!want2P || data.state?.multiplayer)) {
+          setGameId(config.resumeGameId)
+          gameIdRef.current = config.resumeGameId
+          setLoading(false)
+          return
+        }
+      } catch (err) {
+        console.warn('Resume check failed, starting fresh:', err)
+      }
+      await startGame()
+    }
+
+    resumeOrStart()
   }, [config])
 
   // End the game: stop on backend, record, route to result panel
@@ -81,7 +107,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
     const st = stateRef.current || {}
     const finalScore = st.score || 0
     const finalScore2 = st.score2 || 0
-    const finalMultiplayer = st.multiplayer || false
+    const finalMultiplayer = st.multiplayer || effectivePlayerCount(config) >= 2
     const finalTime = st.time_elapsed || 0
     const finalLife = st.life ?? 0
     // out_of_life beats the passed reason (game ended because HP hit 0)
@@ -137,9 +163,10 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         if (data.success) {
           const st = data.state
           // Sound cues on score gain / life loss
-          if (st.score > prevScoreRef.current) playScore()
+          if (st.score > prevScoreRef.current || st.score2 > prevScore2Ref.current) playScore()
           if (prevLifeRef.current !== null && st.life < prevLifeRef.current) playHurt()
           prevScoreRef.current = st.score
+          prevScore2Ref.current = st.score2 || 0
           prevLifeRef.current = st.life
 
           setGameState(st)
@@ -162,7 +189,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         <div className="card">
           <h2>Starting Game...</h2>
           <p style={{ textAlign: 'center', marginTop: '20px' }}>
-            {config.game.toUpperCase()} - Level {config.level} ({config.difficulty})
+            {(config.game || 'hoops').toUpperCase()} - Level {config.level} ({config.difficulty})
           </p>
         </div>
       </div>
@@ -184,13 +211,14 @@ export default function SimulatorScreen({ config, onGameEnd }) {
   const life = gameState?.life ?? gameState?.max_life ?? 0
   const maxLife = gameState?.max_life ?? 20
   const isOver = gameState?.game_over
+  const is2P = gameState?.multiplayer || effectivePlayerCount(config) >= 2
 
   return (
     <div className="simulator-container">
       <div className="simulator-header">
         <div>
           <h2 style={{ margin: 0 }}>
-            {config.game.toUpperCase()} - Level {config.level}
+            {(config.game || 'hoops').toUpperCase()} - Level {config.level}
           </h2>
           <span style={{ fontSize: '0.8rem', color: '#888' }}>
             {config.difficulty?.toUpperCase()}
@@ -201,9 +229,9 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         <div className="game-info">
           <div className="game-info-item">
             <span className="game-info-value">{gameState?.score ?? 0}</span>
-            <span>{gameState?.multiplayer ? 'P1 Score' : 'Score'}</span>
+            <span>{is2P ? 'P1 Score' : 'Score'}</span>
           </div>
-          {gameState?.multiplayer && (
+          {is2P && (
             <div className="game-info-item">
               <span className="game-info-value" style={{ color: '#ffaa44' }}>
                 {gameState?.score2 ?? 0}

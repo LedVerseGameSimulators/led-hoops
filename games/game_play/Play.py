@@ -304,7 +304,6 @@ class Play:
             self.update(dict_group, time_pass)
             if time_pass >= 0.3:
                 logger.warning('bad game frame frequency:' + str(time_pass))
-            return None
 
     
     def running_new(self, dict_group, game, idle, delay_time, parent = (False, 0, None)):

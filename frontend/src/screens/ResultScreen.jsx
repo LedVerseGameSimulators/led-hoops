@@ -5,7 +5,7 @@ const API_URL = 'http://localhost:8000'
 export default function ResultScreen({ result, config, onPlayAgain, onLogout }) {
   const score = result?.score ?? 0
   const score2 = result?.score2 ?? 0
-  const multiplayer = result?.multiplayer ?? false
+  const multiplayer = result?.multiplayer ?? (config.playerCount >= 2 || !!config.cardId2)
   const time = result?.time_elapsed ?? 0
   const life = result?.life ?? 0
   const REASONS = {

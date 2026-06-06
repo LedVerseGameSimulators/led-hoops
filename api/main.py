@@ -104,7 +104,8 @@ async def start_game(request: StartGameRequest) -> StartGameResponse:
         game_id = game_manager.create_game(
             request.card_id,
             request.level,
-            request.difficulty
+            request.difficulty,
+            player_count=request.player_count,
         )
 
         # Start game loop in background
@@ -408,6 +409,7 @@ async def active_game():
                 "card_id": g.card_id,
                 "level": g.level,
                 "difficulty": g.difficulty,
+                "player_count": g.session_player_count,
                 "state": g.get_state(),
             }
     return {"success": False}

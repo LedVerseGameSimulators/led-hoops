@@ -20,8 +20,8 @@ const S = {
 export default function App() {
   const [screen, setScreen] = useState(S.GAME_SELECT)
   const [gameConfig, setGameConfig] = useState({
-    game: 'led_hex',
-    level: '17',
+    game: 'hoops',
+    level: '001',
     playerCount: 1,
     difficulty: 'normal',
     cardId: '',
@@ -36,11 +36,14 @@ export default function App() {
       .then(r => r.json())
       .then(d => {
         if (d.success) {
+          const isDk = String(d.level || '').toUpperCase().startsWith('DK')
+          const players = Math.max(d.player_count || 1, isDk ? 2 : 1)
           setGameConfig(prev => ({
             ...prev,
             cardId: d.card_id,
             level: d.level,
             difficulty: d.difficulty,
+            playerCount: players,
             resumeGameId: d.game_id,
           }))
           setScreen(S.SIMULATOR)
@@ -59,8 +62,12 @@ export default function App() {
   // Step 2: settings confirmed — clear resumeGameId so simulator starts fresh
   const handleSettings = ({ game, level, playerCount, difficulty }) => {
     setGameConfig(prev => ({
-      ...prev, game, level, playerCount, difficulty,
-      resumeGameId: undefined   // don't resume old game
+      ...prev,
+      game: game || prev.game || 'hoops',
+      level,
+      playerCount,
+      difficulty,
+      resumeGameId: undefined,
     }))
     setScreen(S.LOGIN)
   }
@@ -83,7 +90,7 @@ export default function App() {
 
   const handleLogout = () => {
     setResult(null)
-    setGameConfig({ game: 'led_hex', level: '17', playerCount: 1,
+    setGameConfig({ game: 'hoops', level: '001', playerCount: 1,
                    difficulty: 'normal', cardId: '', cardId2: '' })
     setScreen(S.GAME_SELECT)
   }

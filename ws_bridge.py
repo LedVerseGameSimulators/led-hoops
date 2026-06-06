@@ -129,6 +129,7 @@ async def websocket_endpoint(ws: WebSocket):
                                 "row": data.get("row"),
                                 "col": data.get("col"),
                                 "type": data["type"],
+                                "game_id": bridge.current_game_id,
                             },
                             timeout=2,
                         )

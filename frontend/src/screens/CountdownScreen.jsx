@@ -44,7 +44,7 @@ export default function CountdownScreen({ config, onDone }) {
     <div className="screen">
       <div className="card" style={{ textAlign: 'center' }}>
         <p style={{ color: '#888', marginBottom: '10px' }}>
-          {config.game?.toUpperCase()} · Level {config.level} · {config.difficulty?.toUpperCase()}
+          {(config.game || 'hoops').toUpperCase()} · Level {config.level} · {config.difficulty?.toUpperCase()}
         </p>
         <div style={{
           fontSize: '6rem', fontWeight: 'bold', lineHeight: 1.2,

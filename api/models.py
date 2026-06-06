@@ -25,6 +25,7 @@ class StartGameRequest(BaseModel):
     card_id: str
     level: Union[int, str]  # numeric (17-26) or named (DK01)
     difficulty: str  # "easy", "normal", "hard"
+    player_count: int = 1  # 1 = EditorGame (all colors → one score), 2 = EditorGame2 (.ledb only)
 
 class StartGameResponse(BaseModel):
     success: bool
