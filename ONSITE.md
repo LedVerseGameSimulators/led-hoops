@@ -108,7 +108,7 @@ python -c "import serial.tools.list_ports; [print(p) for p in serial.tools.list_
 
 **Expected:** COM3 (or whatever the shelve says) appears in the list.
 
-**If COM port missing:** USB cable not connected, or driver not installed. Install CH340/CP2102 driver for the USB-serial adapter on this machine.
+**If COM port missing:** USB cable not connected, or driver not installed. This floor uses a **WCH USB-Serial adapter** — install the WCH driver: search "WCH CH340 driver Windows" or "WCH CH9102 driver" and download from wch.cn or wch-ic.com. After install, replug USB and re-run the check.
 
 ---
 
