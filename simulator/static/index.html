@@ -157,7 +157,11 @@
 <div id="log"></div>
 
 <script>
-const WS_URL = `ws://${location.host}/ws`;
+const _params = new URLSearchParams(location.search);
+const _gameId = _params.get('game_id');
+const WS_URL = _gameId
+  ? `ws://${location.host}/ws?game_id=${encodeURIComponent(_gameId)}`
+  : `ws://${location.host}/ws`;
 
 // Hoops = 1 row × N cols (each col = one hoop backboard)
 let ROWS = 1, COLS = 6;

@@ -3,7 +3,7 @@
 # Decompiled from: Python 3.7.17 (default, Sep 20 2023, 11:59:52) 
 # [GCC 12.2]
 # Embedded file name: led_control_c.py
-import shelve, sys
+import shelve, sys, os
 import encryption.yanqian as yanqian
 from led import communication, position_convert
 from loguru import logger
@@ -11,6 +11,9 @@ import traceback
 from model.setting import Setting
 from util import util_program
 import gui.language as language
+
+_GAMES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEBUG_PARAM = os.path.join(_GAMES_DIR, 'setting', 'debug_parameter')
 
 class LedControl:
 
@@ -34,8 +37,8 @@ class LedControl:
         if not list_com_info is None:
             if len(list_com_info) == 0:
                 return list_serial_open_error
-            if yanqian():
-                f = shelve.open("./setting/debug_parameter")
+            if yanqian.yanqian():
+                f = shelve.open(_DEBUG_PARAM)
                 com_is_block = f.get("com_is_block")
                 f.close()
                 logger.warning("串口阻塞{}", com_is_block)

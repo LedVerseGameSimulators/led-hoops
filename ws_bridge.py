@@ -43,12 +43,12 @@ class GameBridge:
         await ws.accept()
         async with self.lock:
             self.active_connections.add(ws)
-        print(f"✓ Client connected. Total: {len(self.active_connections)}")
+        print(f"[OK] Client connected. Total: {len(self.active_connections)}")
 
     async def disconnect(self, ws: WebSocket):
         async with self.lock:
             self.active_connections.discard(ws)
-        print(f"✓ Client disconnected. Total: {len(self.active_connections)}")
+        print(f"[OK] Client disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast_state(self, game_state: dict):
         """Send game state to clients. Climb = SQUARE grid, SINGLE RGB per cell."""
@@ -72,9 +72,19 @@ class GameBridge:
             return [0, 0, 0]
 
         grid = []
-        if led_display and len(led_display) == rows * cols:
-            for i in range(rows):
-                grid.append([_rgb(led_display[i * cols + j]) for j in range(cols)])
+        if led_display:
+            n = len(led_display)
+            if rows * cols != n:
+                # Hoops 1×N strip: infer cols from buffer when level/grid disagree.
+                if rows == 1:
+                    cols = n
+                elif n % rows == 0:
+                    cols = n // rows
+            if n == rows * cols:
+                for i in range(rows):
+                    grid.append([_rgb(led_display[i * cols + j]) for j in range(cols)])
+            else:
+                grid = [[[0, 0, 0] for _ in range(cols)] for _ in range(rows)]
         else:
             grid = [[[0, 0, 0] for _ in range(cols)] for _ in range(rows)]
 
@@ -93,7 +103,7 @@ class GameBridge:
                 try:
                     await ws.send_text(msg)
                 except Exception as e:
-                    print(f"✗ Send error: {e}")
+                    print(f"[ERR] Send error: {e}")
                     dead.add(ws)
             self.active_connections -= dead
 
@@ -117,6 +127,7 @@ async def status():
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """WebSocket endpoint for simulator UI"""
+    client_game_id = ws.query_params.get("game_id")
     await bridge.connect(ws)
     async with httpx.AsyncClient() as client:
         try:
@@ -126,6 +137,7 @@ async def websocket_endpoint(ws: WebSocket):
                 try:
                     data = json.loads(msg)
                     if data.get("type") in ("press", "release"):
+                        gid = client_game_id or bridge.current_game_id
                         # Forward to API game-input endpoint
                         await client.post(
                             f"{API_BASE_URL}/game-input",
@@ -133,12 +145,12 @@ async def websocket_endpoint(ws: WebSocket):
                                 "row": data.get("row"),
                                 "col": data.get("col"),
                                 "type": data["type"],
-                                "game_id": bridge.current_game_id,
+                                "game_id": gid,
                             },
                             timeout=2,
                         )
                 except Exception as e:
-                    print(f"✗ Input forward error: {e}")
+                    print(f"[ERR] Input forward error: {e}")
         except WebSocketDisconnect:
             await bridge.disconnect(ws)
 
@@ -148,23 +160,28 @@ async def poll_game_state():
         while True:
             try:
                 # Get active game state from API
-                resp = await client.get(f"{API_BASE_URL}/game-state", timeout=5)
+                resp = await client.get(f"{API_BASE_URL}/active-game", timeout=5)
                 data = resp.json()
 
                 if data.get("success"):
                     # Game running - update state
                     bridge.current_game_id = data["game_id"]
-                    bridge.game_state = data["state"]
+                    bridge.game_state = data.get("state", {})
                     await bridge.broadcast_state(bridge.game_state)
                 else:
-                    # No active game
+                    # No active game — send blank frame so simulator clears
                     bridge.current_game_id = None
                     bridge.game_state = {}
+                    await bridge.broadcast_state({
+                        "led_display": [[0, 0, 0]] * 6,
+                        "grid_rows": 1,
+                        "grid_cols": 6,
+                    })
 
-                await asyncio.sleep(0.016)  # ~60fps
+                await asyncio.sleep(0.033)  # ~30fps
 
             except Exception as e:
-                print(f"✗ Poll error: {e}")
+                print(f"[ERR] Poll error: {e!r}")
                 await asyncio.sleep(1)
 
 @app.on_event("startup")

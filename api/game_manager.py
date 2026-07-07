@@ -1137,6 +1137,9 @@ class GameManager:
                         try:
                             lr = max(1, int(getattr(go, "row", lr)))
                             lc = max(1, int(getattr(go, "col", lc)))
+                            # Never shrink below physical floor (hardware shelve dims).
+                            lr = max(lr, _HW_DEFAULT_ROWS)
+                            lc = max(lc, _HW_DEFAULT_COLS)
                             led_table.resize(lr, lc)
                             if play is not None:
                                 play.obj_led_table = led_table
@@ -1376,11 +1379,21 @@ class GameManager:
                             try:
                                 _rc = led_table.led_row
                                 _cc = led_table.led_col
+                                _need = _rc * _cc
+                                if len(led_display) < _need:
+                                    led_display = led_display + [[0, 0, 0]] * (_need - len(led_display))
                                 _ld2 = [[led_display[r * _cc + c] for c in range(_cc)] for r in range(_rc)]
                                 _hw_led_control.draw_screen_by_com(_hw_layout_type, _ld2)
-                                _hw_led_control.update_screen_state_by_com(_hw_layout_type, led_table.state_table, led_table.state_table)
+                                _hw_tick = getattr(game, "_hw_tick", 0) + 1
+                                game._hw_tick = _hw_tick
+                                if _hw_tick % 3 == 0:
+                                    _hw_led_control.update_screen_state_by_com(
+                                        _hw_layout_type,
+                                        led_table.state_table,
+                                        led_table.state_table,
+                                    )
                             except Exception as _hw_err:
-                                logger.debug(f"HW I/O: {_hw_err}")
+                                logger.warning(f"HW I/O: {_hw_err}")
 
                         game.update_state(
                             score=game.score,

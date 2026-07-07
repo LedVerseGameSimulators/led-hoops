@@ -277,7 +277,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
       <div className="simulator-content">
         <iframe
           ref={iframeRef}
-          src={WS_BRIDGE_URL}
+          src={gameId ? `${WS_BRIDGE_URL}?game_id=${gameId}` : WS_BRIDGE_URL}
           style={{ width: '100%', height: '100%', border: 'none' }}
           title="Game Simulator"
         />
