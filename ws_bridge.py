@@ -93,19 +93,27 @@ class GameBridge:
             "rows": rows,
             "cols": cols,
             "grid": grid,
+            "pressed": game_state.get("pressed_tiles", []),
             "fps": 60,
             "game_id": self.current_game_id
         })
 
         async with self.lock:
-            dead = set()
-            for ws in self.active_connections:
-                try:
-                    await ws.send_text(msg)
-                except Exception as e:
-                    print(f"[ERR] Send error: {e}")
-                    dead.add(ws)
-            self.active_connections -= dead
+            conns = list(self.active_connections)
+
+        async def _send(ws):
+            try:
+                await ws.send_text(msg)
+                return None
+            except Exception as e:
+                print(f"[ERR] Send error: {e}")
+                return ws
+
+        results = await asyncio.gather(*(_send(ws) for ws in conns), return_exceptions=False)
+        dead = {ws for ws in results if ws is not None}
+        if dead:
+            async with self.lock:
+                self.active_connections -= dead
 
 bridge = GameBridge()
 

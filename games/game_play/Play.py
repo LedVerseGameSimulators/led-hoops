@@ -132,7 +132,7 @@ class Play:
         return smer
 
     
-    def clear_led_table(self, color = (Color.BLACK,)):
+    def clear_led_table(self, color=Color.BLACK):
         obj_led_table = self.obj_led_table
         led_table = obj_led_table.led_table
         arr_wall_light = obj_led_table.get_wall_light_arr()

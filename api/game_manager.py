@@ -103,6 +103,18 @@ _HW_DEFAULT_ROWS = 1   # Hoops: 1-row hoop strip
 _HW_DEFAULT_COLS = 6   # Hoops: 6 hoop columns
 _hw_led_control = None
 _hw_layout_type = 0
+_HW_DRAW_INTERVAL = float(os.environ.get("HW_DRAW_INTERVAL", "0.045"))
+_hw_serial_lock = threading.Lock()
+
+
+def _normalize_rgb(cell):
+    """Ensure [R,G,B] ints. Play.clear_led_table can leave nested tuples."""
+    if isinstance(cell, (list, tuple)):
+        if len(cell) >= 3 and isinstance(cell[0], (int, float)):
+            return [int(cell[0]), int(cell[1]), int(cell[2])]
+        if len(cell) == 1:
+            return _normalize_rgb(cell[0])
+    return [0, 0, 0]
 
 def _hw_init():
     """Open serial COM ports and init tile layout mapping. Called once at game start."""
@@ -974,14 +986,22 @@ class GameManager:
     def __init__(self):
         self.games: Dict[str, GameInstance] = {}
         self.lock = threading.Lock()
+        self._create_lock = threading.Lock()
+        self.zombie_threads = []
         logger.info("GameManager initialized")
 
     def clear_all(self):
-        """Stop and remove all existing games (kiosk = one game at a time)."""
+        """Stop and remove all existing games. Joins threads (3s timeout) before clearing."""
         with self.lock:
             for gid, g in list(self.games.items()):
                 g.running = False
+            threads = [(gid, g.thread) for gid, g in self.games.items() if getattr(g, "thread", None)]
             self.games.clear()
+        for gid, t in threads:
+            t.join(timeout=3.0)
+            if t.is_alive():
+                logger.warning(f"Thread {gid} didn't stop in 3s — zombie")
+                self.zombie_threads.append(gid)
         logger.info("Cleared all existing games")
 
     def create_game(self, card_id: str, level: int, difficulty: str,
@@ -1023,7 +1043,6 @@ class GameManager:
                     _hw_init()
 
                 logger.info(f"Starting game loop: {game_id}")
-                game.running = True
 
                 # Import game modules (with fallback to mock loop on import error)
                 Play = None
@@ -1375,25 +1394,27 @@ class GameManager:
                             led_display[fi * cols + fj] = [255, 255, 255] if on else [0, 0, 0]
 
                         # ── HARDWARE I/O ─────────────────────────────────────
-                        if USE_SERIAL_HD and _hw_led_control is not None:
-                            try:
-                                _rc = led_table.led_row
-                                _cc = led_table.led_col
-                                _need = _rc * _cc
-                                if len(led_display) < _need:
-                                    led_display = led_display + [[0, 0, 0]] * (_need - len(led_display))
-                                _ld2 = [[led_display[r * _cc + c] for c in range(_cc)] for r in range(_rc)]
-                                _hw_led_control.draw_screen_by_com(_hw_layout_type, _ld2)
-                                _hw_tick = getattr(game, "_hw_tick", 0) + 1
-                                game._hw_tick = _hw_tick
-                                if _hw_tick % 3 == 0:
+                        _now = time.time()
+                        if USE_SERIAL_HD and _hw_led_control is not None and \
+                                _now - getattr(game, "_hw_last_draw", 0) >= _HW_DRAW_INTERVAL:
+                            with _hw_serial_lock:
+                                try:
+                                    _rc = led_table.led_row
+                                    _cc = led_table.led_col
+                                    _need = _rc * _cc
+                                    if len(led_display) < _need:
+                                        led_display = led_display + [[0, 0, 0]] * (_need - len(led_display))
+                                    _ld2 = [[_normalize_rgb(led_display[r * _cc + c]) for c in range(_cc)] for r in range(_rc)]
+                                    _hw_led_control.draw_screen_by_com(_hw_layout_type, _ld2)
+                                    game._hw_last_draw = _now
+                                    game._hw_draw_count = getattr(game, "_hw_draw_count", 0) + 1
                                     _hw_led_control.update_screen_state_by_com(
                                         _hw_layout_type,
                                         led_table.state_table,
                                         led_table.state_table,
                                     )
-                            except Exception as _hw_err:
-                                logger.warning(f"HW I/O: {_hw_err}")
+                                except Exception as _hw_err:
+                                    logger.warning(f"HW I/O: {_hw_err}")
 
                         game.update_state(
                             score=game.score,
@@ -1506,6 +1527,8 @@ class GameManager:
                     game_over_reason=str(e)
                 )
 
+        game.running = True   # set synchronously — clear_all() won't skip this thread
+        game._sim_pressed = set()
         game.thread = threading.Thread(target=_run_game, daemon=True)
         game.thread.start()
 

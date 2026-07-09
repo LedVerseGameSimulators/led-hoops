@@ -168,6 +168,7 @@ let ROWS = 1, COLS = 6;
 let CELL = 90, GAP = 8, GLOW_AMOUNT = 16;
 let holdMode = false;
 let grid = [], pressed = new Set(), pressedCount = 0, activeTiles = 0;
+let serverPressed = new Set();
 
 const canvas = document.getElementById('boardCanvas');
 const ctx = canvas.getContext('2d');
@@ -228,7 +229,7 @@ function drawFrame() {
     for (let c = 0; c < COLS; c++) {
       const [ri, gi, bi] = cellRGB((grid[r] || [])[c]);
       const key = `${r},${c}`;
-      const isPressed = pressed.has(key);
+      const isPressed = pressed.has(key) || serverPressed.has(key);
       const on = (ri + gi + bi) > 2;
       if (on) activeTiles++;
       const { x, y } = cellTopLeft(r, c);
@@ -283,6 +284,9 @@ function connect() {
       const msg = JSON.parse(data);
       if (msg.type === 'frame') {
         ROWS = msg.rows; COLS = msg.cols; grid = msg.grid;
+        if (Array.isArray(msg.pressed)) {
+          serverPressed = new Set(msg.pressed.map(p => `${p.row},${p.col}`));
+        }
         document.getElementById('stat-fps').textContent = msg.fps;
         document.getElementById('stat-grid').textContent = `${COLS} hoops`;
         resizeCanvas();
