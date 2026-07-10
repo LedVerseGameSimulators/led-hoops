@@ -211,8 +211,10 @@ export default function SimulatorScreen({ config, onGameEnd }) {
   }
 
   const timeLeft = gameState?.time_left != null ? gameState.time_left : 300
-  const life = gameState?.life ?? gameState?.max_life ?? 0
-  const maxLife = gameState?.max_life ?? 20
+  // Hearts: 5 shown (each absorbs 4 mistakes). Backend sends display_lives/display_max;
+  // fall back to raw HP for older builds.
+  const life = gameState?.display_lives ?? gameState?.life ?? gameState?.max_life ?? 0
+  const maxLife = gameState?.display_max ?? gameState?.max_life ?? 5
   const isOver = gameState?.game_over
   const is2P = gameState?.multiplayer || effectivePlayerCount(config) >= 2
 
@@ -221,7 +223,7 @@ export default function SimulatorScreen({ config, onGameEnd }) {
       <div className="simulator-header">
         <div>
           <h2 style={{ margin: 0 }}>
-            {(config.game || 'hoops').toUpperCase()} - Level {config.level}
+            {(config.game || 'hoops').toUpperCase()} - Level {gameState?.current_level ?? config.level}
           </h2>
           <span style={{ fontSize: '0.8rem', color: '#888' }}>
             {config.difficulty?.toUpperCase()}

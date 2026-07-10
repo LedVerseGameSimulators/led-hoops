@@ -8,6 +8,7 @@ import threading
 import time
 import asyncio
 import os
+import math
 import shelve as _shelve
 from typing import Dict, Optional
 from loguru import logger
@@ -244,38 +245,58 @@ def load_real_settings() -> dict:
     return s
 
 
+# Level-progression tiers (dirs under source/, easy→hard). Category is locked
+# by the START level's file type: .led = 1-player, .ledb = 2-player. A 1P
+# session marathons only the 1P tiers and never crosses into 2P (and vice versa).
+_TIERS_1P = ["-", "--"]      # casual → level (.led)
+_TIERS_2P = ["---"]          # DK 2P (.ledb)
+
+
 def _build_level_sequence(start_level):
-    """Ordered list of level FILE PATHS from start_level to end of its series.
-    Hoops naming:
-      casual:  source/-/*.led     (001..010 etc)
-      level:   source/--/*.led    (14..24 etc)
-      dk:      source/---/*.ledb  (DK01..DK10, 2-player)
+    """Ordered list of level FILE PATHS forming the marathon.
+
+    Category is locked by the START level's file type. A start level found in a
+    1P (.led) tier yields a 1P-only chain (its tier onward through _TIERS_1P);
+    a start level in a 2P (.ledb) tier yields a 2P-only chain. Never mixes.
     """
     import glob as _glob
     src = str(GAMES_ROOT)
-    sl = str(start_level or "001")
+    sl = str(start_level or "").strip()
+
     def _sort_key(p):
         stem = os.path.basename(p).rsplit(".", 1)[0]
-        if stem.isdigit():
-            return (0, int(stem))
-        return (1, stem.lower())
+        return (0, int(stem)) if stem.isdigit() else (1, stem.lower())
 
-    if sl.upper().startswith("DK"):
-        files = sorted(_glob.glob(os.path.join(src, "source", "---", "*.ledb")), key=_sort_key)
-    elif os.path.isfile(os.path.join(src, "source", "--", f"{sl}.led")):
-        files = sorted(_glob.glob(os.path.join(src, "source", "--", "*.led")), key=_sort_key)
-    else:
-        files = sorted(_glob.glob(os.path.join(src, "source", "-", "*.led")), key=_sort_key)
-    if not files:
-        return []
-    # Start at the chosen level (match by filename stem).
-    start_idx = 0
-    for i, f in enumerate(files):
-        stem = os.path.basename(f).rsplit(".", 1)[0]
-        if stem == sl or stem.startswith(sl):
-            start_idx = i
-            break
-    return files[start_idx:]
+    def _chain(dirs, ext):
+        return [(d, sorted(_glob.glob(os.path.join(src, "source", d, f"*.{ext}")),
+                           key=_sort_key)) for d in dirs]
+
+    chain_1p = _chain(_TIERS_1P, "led")
+    chain_2p = _chain(_TIERS_2P, "ledb")
+
+    def _find(chain):
+        for ti, (_d, files) in enumerate(chain):
+            for fi, f in enumerate(files):
+                stem = os.path.basename(f).rsplit(".", 1)[0]
+                if stem == sl or stem.startswith(sl):
+                    return ti, fi
+        return None
+
+    loc = _find(chain_1p)
+    chain = chain_1p
+    if loc is None:
+        loc = _find(chain_2p)
+        chain = chain_2p
+    if loc is None:                       # unknown start → begin at 1P tier 0
+        chain, loc = chain_1p, (0, 0)
+        if not chain or not chain[0][1]:
+            return []
+
+    ti, fi = loc
+    seq = list(chain[ti][1][fi:])         # remaining levels in the start tier
+    for j in range(ti + 1, len(chain)):   # then all later SAME-category tiers
+        seq.extend(chain[j][1])
+    return seq
 
 
 def _level_uses_2p_scoring(lvl_path: str, session_player_count: int) -> bool:
@@ -710,6 +731,8 @@ class GameInstance:
         self.levels_cleared = 0        # how many levels finished this session
         self._session_over = False     # True -> stop the session loop
         self._level_cleared = False    # True -> advance to next level
+        self._restart_level = False    # True -> replay same level (life=0, time left)
+        self._saw_scoreable = False    # True once any scoreable wave appeared this level
 
         self.current_state = {
             "score": 0,
@@ -717,6 +740,8 @@ class GameInstance:
             "time_left": self.game_time_sec,
             "life": self.max_life,
             "max_life": self.max_life,
+            "display_lives": math.ceil(self.max_life / 4),   # 20 HP -> 5 hearts
+            "display_max": math.ceil(self.max_life / 4),     # 5
             "score2": 0,
             "multiplayer": False,
             "player_pos": [0, 0],
@@ -759,6 +784,8 @@ class GameInstance:
         self._cell_red_penalty_at.clear()
         self.green_cells = set()
         self._level_cleared = False
+        self._restart_level = False
+        self._saw_scoreable = False
         self._level_time_pass = 0.0
         self._wave_skip_at = None
 
@@ -1102,9 +1129,14 @@ class GameManager:
                 try:
                     logger.debug(f"Creating Play instance for game {game_id}")
                     play = Play(led_table, mock_setting, dummy_callback, game_level=game_level_num)
-                    # Sweep speed scale (cells/sec = (1/group.speed) * game_level_speed).
-                    # Lower = slower sweep. Tune per difficulty to match real game pace.
-                    difficulty_speed = {"easy": 0.25, "normal": 0.4, "hard": 0.6}
+                    # Sweep speed scale: time-per-cell = group.speed / game_level_speed.
+                    # ONLY affects MOVING groups (group.speed != 0); all-static levels
+                    # (e.g. hoops 001/003) ignore it. Now that Play.running/running_by_blue
+                    # correctly gate cell-steps on accumulated move_distance (see Play.py),
+                    # this value gives a real, meaningful cadence — e.g. at speed=2.0,
+                    # normal=0.4 -> one cell every 2.0/0.4 = 5s. TUNE HERE if moving
+                    # levels still feel too fast/slow.
+                    difficulty_speed = {"easy": 0.27, "normal": 0.4, "hard": 0.6}
                     play.game_level_speed = difficulty_speed.get(game.difficulty, 0.4)
                     if game.session_player_count >= 2:
                         play.game_level_speed *= 0.65  # DK levels: slower sweep, less strobe
@@ -1207,6 +1239,12 @@ class GameManager:
                         #   life<=0          -> result 0 (out of lives)
                         #   session timer up -> result 2 (5-min timeout)
                         if game.life <= 0:
+                            time_left = game.game_time_sec - session_elapsed
+                            if time_left > 10.0:
+                                # Lives gone but time remains: restart same level,
+                                # keep score. Session loop refills HP and replays.
+                                game._restart_level = True
+                                return False
                             game._session_over = True
                             game.update_state(game_over_reason="out_of_life", result=0)
                             return False
@@ -1301,6 +1339,11 @@ class GameManager:
                         game.deduct_cells = deduct_cells
                         game.green_cells = green_cells
 
+                        # Remember that scoreable tiles appeared — so an empty
+                        # board later means "all collected", not "not started".
+                        if goal_cells or goal2_cells:
+                            game._saw_scoreable = True
+
                         # ── WAVE SKIP (scoreable-only) ───────────────────────
                         # When the current scoreable wave is cleared, skip dead
                         # time to the next wave. running_by_blue can't do this
@@ -1338,6 +1381,14 @@ class GameManager:
                                     game._level_time_pass = next_wave_start
                                     game._wave_skip_at = None
                                     return True
+                            elif active_scoreable_now == 0 and next_wave_start is None \
+                                    and game._saw_scoreable:
+                                # All scoreable tiles collected/expired and no more
+                                # waves this level → level cleared, advance to next.
+                                logger.info(f"✓ All scoreable tiles done at "
+                                            f"{total_pass:.1f}s → level clear")
+                                game._level_cleared = True
+                                return False
                             else:
                                 game._wave_skip_at = None
 
@@ -1423,6 +1474,8 @@ class GameManager:
                             time_elapsed=session_elapsed,                       # SESSION elapsed
                             time_left=max(0, game.game_time_sec - session_elapsed),  # SESSION countdown
                             life=game.life,
+                            display_lives=math.ceil(game.life / 4),          # 5 hearts, 4 mistakes each
+                            display_max=math.ceil(game.max_life / 4),
                             game_over=False,
                             led_display=led_display,
                             grid_rows=led_table.led_row,
@@ -1461,7 +1514,7 @@ class GameManager:
                     if game._session_over or not game.running:
                         break
                     session_elapsed = time.time() - game.session_start
-                    if session_elapsed > game.game_time_sec or game.life <= 0:
+                    if session_elapsed > game.game_time_sec:
                         game._session_over = True
                         break
 
@@ -1471,33 +1524,53 @@ class GameManager:
                         logger.warning(f"Skipping unloadable level: {lvl_id}")
                         continue
 
-                    game.current_level_id = lvl_id
-                    game.reset_for_level()      # clear board state (keep score/life)
-                    _setup_level(dg, go, lvl_path)  # dict_group, board_time, zone, mp, anim
-                    logger.info(f"▶ Level {lvl_id}: groups={len(dg)}, "
-                                f"mp={game.multiplayer}, board_time={game.board_time_sec}s, "
-                                f"score={game.score}, life={game.life}, "
-                                f"t_left={game.game_time_sec - session_elapsed:.0f}s")
+                    # ── RESTART LOOP: replay this level whenever lives hit 0 with
+                    #    >10s left (score persists, HP refills). Exits on level
+                    #    clear, session timeout, or true game-over (life=0, <10s).
+                    while True:
+                        game.current_level_id = lvl_id
+                        game.reset_for_level()      # clear board state (keep score/life)
+                        _setup_level(dg, go, lvl_path)  # dict_group, board_time, zone, mp, anim
+                        session_elapsed = time.time() - game.session_start
+                        logger.info(f"▶ Level {lvl_id}: groups={len(dg)}, "
+                                    f"mp={game.multiplayer}, board_time={game.board_time_sec}s, "
+                                    f"score={game.score}, life={game.life}, "
+                                    f"t_left={game.game_time_sec - session_elapsed:.0f}s")
 
-                    # Run this level. Blocks until callback returns False.
-                    play.running_state = True
-                    play.total_pass = 0
-                    try:
-                        if game._play_order:
-                            play.running(dg)
-                        else:
-                            play.running_by_blue(dg)
-                    except Exception as run_err:
-                        import traceback
-                        logger.warning(f"Level {lvl_id} run error: {run_err}\n"
-                                       f"{traceback.format_exc()}")
+                        # Run this level. Blocks until callback returns False.
+                        play.running_state = True
+                        play.total_pass = 0
+                        try:
+                            if game._play_order:
+                                play.running(dg)
+                            else:
+                                play.running_by_blue(dg)
+                        except Exception as run_err:
+                            import traceback
+                            logger.warning(f"Level {lvl_id} run error: {run_err}\n"
+                                           f"{traceback.format_exc()}")
+                            game._session_over = True
+                            break
+
+                        if game._session_over:
+                            break
+
+                        if game._restart_level:
+                            # life=0 with time remaining — refill HP, replay level
+                            game.life = game.max_life
+                            game._cell_red_penalty_at.clear()
+                            game.last_life_loss_time = 0.0
+                            logger.info(f"↻ Life restart: level={lvl_id}, score={game.score}")
+                            continue
+
+                        if game._level_cleared:
+                            game.levels_cleared += 1
+                            logger.info(f"✓ Level {lvl_id} cleared "
+                                        f"(total cleared={game.levels_cleared})")
                         break
 
-                    if game._level_cleared:
-                        game.levels_cleared += 1
-                        logger.info(f"✓ Level {lvl_id} cleared "
-                                    f"(total cleared={game.levels_cleared})")
-                    # else: session ended (life/timeout) — loop guard will exit.
+                    if game._session_over:
+                        break
 
                 # Session finished (timer/lives/sequence end).
                 game._session_over = True

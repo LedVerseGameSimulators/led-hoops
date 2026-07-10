@@ -229,24 +229,24 @@ class Play:
             for key, value in self.dict_group.items():
                 group = value
                 set_cell = group.start_member
-                change = 0
                 last_speed = 0
                 if group.speed != 0:
-      
-
                     last_speed = (1 / group.speed) * self.game_level_speed
-                start_time = group.start_time_sec
-                end_time = group.end_time_sec
-                if self.group_in_time(start_time, end_time) or last_speed != 0:
-                    tmp_time = self.total_pass - start_time
-                    if tmp_time < time_pass:
-                        change = tmp_time * last_speed
-                group.move_distance += change
-                (direction_current, set_cell_current) = self.deal_all_direction(group)
-                group.start_member = set_cell_current
-                group.direct = direction_current
+                # Same fix as running_by_blue: accumulate fractional cells-per-frame
+                # every frame the group is active (previously computed once on the
+                # group's first active frame then silently stopped), and only step
+                # one grid cell once a full cell's worth of distance has accumulated
+                # (previously deal_all_direction fired every frame regardless,
+                # moving a full cell per callback tick no matter the speed setting).
+                if last_speed != 0 and self.group_in_time(group.start_time_sec, group.end_time_sec):
+                    group.move_distance += last_speed * time_pass
+                if group.move_distance >= 1.0:
+                    (direction_current, set_cell_current) = self.deal_all_direction(group)
+                    group.start_member = set_cell_current
+                    group.direct = direction_current
+                    group.move_distance -= 1.0
                 self.dict_group[key] = group
-            
+
             self.update(dict_group, time_pass)
 
     
@@ -286,26 +286,30 @@ class Play:
             for key, value in self.dict_group.items():
                 group = value
                 set_cell = group.start_member
-                change = 0
                 last_speed = 0
                 if group.speed != 0:
                     last_speed = (1 / group.speed) * self.game_level_speed
-                    change = last_speed * time_pass
-                if self.group_in_time(group.start_time_sec, group.end_time_sec) or last_speed != 0:
-                    tmp_time = self.total_pass - group.start_time_sec
-                    if tmp_time < time_pass:
-                        change = tmp_time * last_speed
-                group.move_distance += change
-                (direction_current, set_cell_current) = self.deal_all_direction(group)
-                group.start_member = set_cell_current
-                group.direct = direction_current
+                # Accumulate fractional cells-per-frame every frame the group is
+                # active (previously only computed once on the group's first
+                # active frame, then silently stopped accumulating — and the
+                # cell-step below fired every frame regardless, moving a full
+                # cell per callback tick no matter what speed was configured).
+                if last_speed != 0 and self.group_in_time(group.start_time_sec, group.end_time_sec):
+                    group.move_distance += last_speed * time_pass
+                # Only advance one grid cell once a full cell's worth of
+                # distance has accumulated; keep the fractional remainder.
+                if group.move_distance >= 1.0:
+                    (direction_current, set_cell_current) = self.deal_all_direction(group)
+                    group.start_member = set_cell_current
+                    group.direct = direction_current
+                    group.move_distance -= 1.0
                 self.dict_group[key] = group
-            
+
             self.update(dict_group, time_pass)
             if time_pass >= 0.3:
                 logger.warning('bad game frame frequency:' + str(time_pass))
 
-    
+
     def running_new(self, dict_group, game, idle, delay_time, parent = (False, 0, None)):
         self.running_state = True
         self.last_time = time.time()
