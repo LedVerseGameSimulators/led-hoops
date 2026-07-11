@@ -730,6 +730,7 @@ class GameInstance:
         self.current_level_id = None   # e.g. "A005" (for frontend display)
         self.levels_cleared = 0        # how many levels finished this session
         self._session_over = False     # True -> stop the session loop
+        self._end_reason = None        # why the marathon loop exited (timeout/etc)
         self._level_cleared = False    # True -> advance to next level
         self._restart_level = False    # True -> replay same level (life=0, time left)
         self._saw_scoreable = False    # True once any scoreable wave appeared this level
@@ -751,6 +752,7 @@ class GameInstance:
             "result": None,
             "current_level": None,
             "levels_cleared": 0,
+            "started_at": "",
         }
         self.thread = None
 
@@ -1150,6 +1152,9 @@ class GameManager:
                 game.play = play
                 game.led_table = led_table          # expose for press input
                 game.session_start = time.time()
+                import datetime as _dt
+                game.update_state(started_at=_dt.datetime.now().isoformat(timespec="seconds"))
+                game._end_reason = None
                 game.level_sequence = _build_level_sequence(game.level)
                 logger.info(f"Session: {len(game.level_sequence)} levels from "
                             f"'{game.level}' (5-min marathon)")
@@ -1250,6 +1255,7 @@ class GameManager:
                             return False
                         if (not game.running) or session_elapsed > game.game_time_sec:
                             game._session_over = True
+                            game._end_reason = "timeout"
                             game.update_state(game_over_reason="timeout", result=2)
                             return False
                         # ── LEVEL-END by TIME (advance to next level) ──
@@ -1516,6 +1522,7 @@ class GameManager:
                     session_elapsed = time.time() - game.session_start
                     if session_elapsed > game.game_time_sec:
                         game._session_over = True
+                        game._end_reason = "timeout"
                         break
 
                     lvl_id = os.path.basename(lvl_path).rsplit(".", 1)[0]
@@ -1582,10 +1589,19 @@ class GameManager:
 
                 # Session finished (timer/lives/sequence end).
                 game._session_over = True
-                final_reason = game.get_state().get("game_over_reason") or "session_end"
-                final_result = game.get_state().get("result")
-                if final_result is None:
-                    final_result = 1  # cleared the whole series within time
+                # Result honesty: 1 = cleared the whole level chain within time,
+                # 2 = ran out of session time, 0 = out of life. Only a genuine
+                # chain-exhaustion (loop finished with no timeout/out-of-life
+                # reason) counts as "complete".
+                state_result = game.get_state().get("result")
+                if state_result is not None:
+                    final_result = state_result          # frame callback already decided (out-of-life)
+                elif game._end_reason == "timeout":
+                    final_result = 2
+                else:
+                    final_result = 1                     # chain fully cleared in time
+                final_reason = (game.get_state().get("game_over_reason")
+                                or game._end_reason or "session_end")
                 final_score = game.compute_final_score(game.score)
                 final_score2 = game.compute_final_score(game.score2)
                 logger.info(f"Session over: reason={final_reason}, "
