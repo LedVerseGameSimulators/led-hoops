@@ -26,6 +26,8 @@ export default function App() {
     difficulty: 'normal',
     cardId: '',
     cardId2: '',
+    playerName: '',
+    playerName2: '',
   })
   const [result, setResult] = useState(null)
   const [booting, setBooting] = useState(true)
@@ -73,8 +75,14 @@ export default function App() {
   }
 
   // Step 3: login (1 or 2 cards)
-  const handleLogin = (cardId, cardId2) => {
-    setGameConfig(prev => ({ ...prev, cardId, cardId2: cardId2 || '' }))
+  const handleLogin = (cardId, cardId2, playerName = '', playerName2 = '') => {
+    setGameConfig(prev => ({
+      ...prev,
+      cardId: cardId || '',
+      cardId2: cardId2 || '',
+      playerName: playerName || '',
+      playerName2: playerName2 || '',
+    }))
     setScreen(S.COUNTDOWN)
   }
 
@@ -115,6 +123,7 @@ export default function App() {
       )}
       {screen === S.LOGIN && (
         <LoginScreen
+          gameTitle="🏀 Hoops"
           playerCount={gameConfig.playerCount}
           onLogin={handleLogin}
           onBack={() => setScreen(S.SETTINGS)}
