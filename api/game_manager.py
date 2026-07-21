@@ -17,6 +17,21 @@ from loguru import logger
 from .config import GAME_TIMEOUT_SECONDS, MAX_CONCURRENT_GAMES, GAMES_ROOT
 from .level_scaling import LevelScalingError, scale_level_to_platform
 
+try:
+    from hardware_config import (
+        HardwareConfigError,
+        parse_dimension,
+        validate_hardware_config,
+        validate_platform_config,
+    )
+except ImportError:  # pragma: no cover - package-relative fallback
+    from ..hardware_config import (  # type: ignore
+        HardwareConfigError,
+        parse_dimension,
+        validate_hardware_config,
+        validate_platform_config,
+    )
+
 # Hardware mode: set USE_SERIAL_HD=1 env var to drive physical LED floor via serial.
 # Sim mode (default): browser canvas only. HW mode: serial + canvas simultaneously.
 USE_SERIAL_HD = os.environ.get("USE_SERIAL_HD", "0") == "1"
@@ -134,14 +149,21 @@ def _hw_init():
         db = _s.open(str(GAMES_ROOT / 'setting' / 'led_parameter'), flag='r')
         try:
             list_com_info = db.get('list_com_info', [])
-            layout_type   = int(db.get('led_layout_type', 0))
+            layout_type = db.get('led_layout_type', 0)
         finally:
             db.close()
-        if not list_com_info:
-            raise RuntimeError("no COM ports configured")
-        no_use        = platform["floor_layout_coors_no_use"]
-        rows          = platform["grid_rows"]
-        cols          = platform["grid_cols"]
+        validated = validate_hardware_config(
+            platform["grid_rows"],
+            platform["grid_cols"],
+            platform["floor_layout_coors_no_use"],
+            layout_type,
+            list_com_info,
+        )
+        rows = validated["rows"]
+        cols = validated["cols"]
+        no_use = validated["no_use"]
+        layout_type = validated["layout_type"]
+        list_com_info = validated["com_info"]
         _lc.init_layout(layout_type, rows, cols, no_use)
         com_init_attempted = True
         errors = _lc.init_com(list_com_info)
@@ -149,7 +171,10 @@ def _hw_init():
             raise RuntimeError(f"COM initialization errors: {errors}")
         if not getattr(_lc, "g_has_open", False):
             raise RuntimeError("serial driver did not open any COM port")
-        logger.info(f"Hardware ready: {len(list_com_info)} port(s), {rows}×{cols}, layout={layout_type}")
+        logger.info(
+            f"Hardware ready: {len(list_com_info)} port(s), "
+            f"{rows}×{cols}, layout={layout_type}"
+        )
         _hw_led_control = _lc
         _hw_layout_type = layout_type
     except Exception as e:
@@ -246,15 +271,27 @@ def load_real_settings() -> dict:
             ls = db.get("leval_span_sw")
             if ls is not None:
                 s["leval_span"] = float(ls)
-            vh = db.get("value_high")
-            if vh is not None:
-                s["grid_rows"] = int(float(vh))
-            vw = db.get("value_width")
-            if vw is not None:
-                s["grid_cols"] = int(float(vw))
-            no_use = db.get("floor_layout_coors_no_use")
-            if no_use is not None:
-                s["floor_layout_coors_no_use"] = list(no_use)
+            # Parse integer-valued platform dims when valid; otherwise keep the
+            # raw present value so callers can fail closed instead of truncating
+            # fractions/bools into a fake 1x6 platform.
+            if "value_high" in db:
+                raw_rows = db.get("value_high")
+                try:
+                    s["grid_rows"] = parse_dimension(raw_rows, "grid_rows")
+                except HardwareConfigError:
+                    s["grid_rows"] = raw_rows
+            if "value_width" in db:
+                raw_cols = db.get("value_width")
+                try:
+                    s["grid_cols"] = parse_dimension(raw_cols, "grid_cols")
+                except HardwareConfigError:
+                    s["grid_cols"] = raw_cols
+            if "floor_layout_coors_no_use" in db:
+                raw_no_use = db.get("floor_layout_coors_no_use")
+                if isinstance(raw_no_use, (list, tuple)):
+                    s["floor_layout_coors_no_use"] = list(raw_no_use)
+                else:
+                    s["floor_layout_coors_no_use"] = raw_no_use
             dp = db.get("game_scode_divide_person")
             if dp is not None:
                 s["scode_divide_person"] = bool(dp)
@@ -388,24 +425,20 @@ def _load_level_file(path):
         return None, None
 
 
-def _configured_platform_dimension(settings, key):
-    value = settings.get(key)
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise LevelScalingError(
-            f"{key} must be a positive integer, got {value!r}"
-        )
-    return value
-
-
 def prepare_level_for_platform(dict_group, game_obj, settings):
     """Scale one freshly loaded level to the configured physical platform.
 
     The scaler mutates in place; this boundary preserves and returns the input
     object identities in the loader's ``(dict_group, game_obj)`` order.
     """
-    rows = _configured_platform_dimension(settings, "grid_rows")
-    cols = _configured_platform_dimension(settings, "grid_cols")
-    no_use = settings.get("floor_layout_coors_no_use", ())
+    try:
+        rows, cols, no_use = validate_platform_config(
+            settings.get("grid_rows"),
+            settings.get("grid_cols"),
+            settings.get("floor_layout_coors_no_use", ()),
+        )
+    except HardwareConfigError as error:
+        raise ValueError(str(error)) from error
     scale_level_to_platform(game_obj, dict_group, rows, cols, no_use)
     return dict_group, game_obj
 
@@ -1438,7 +1471,19 @@ class GameManager:
                     if 'led.led_control' not in sys.modules:
                         sys.modules['led.led_control'] = MagicMock()
                 else:
-                    _hw_init()
+                    if _hw_init() is None:
+                        logger.error(
+                            f"Hardware init failed for {game_id}; "
+                            "aborting before Play/level load"
+                        )
+                        _mark_session_error(game, "hardware_error")
+                        game.running = False
+                        game.update_state(
+                            game_over=True,
+                            game_over_reason="hardware_error",
+                            result=0,
+                        )
+                        return
 
                 logger.info(f"Starting game loop: {game_id}")
 

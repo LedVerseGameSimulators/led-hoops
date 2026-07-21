@@ -62,8 +62,10 @@ Read all three fully before running anything.
 1. Follow `ONSITE.md` steps 1–8 to get Python installed, dependencies
    installed, the hardware shelve verified, and the COM port confirmed
    visible in Device Manager. Run the standalone hardware diagnostic while
-   the full stack is stopped. After it releases COM, start FastAPI,
-   `ws_bridge`, and React with `scripts\start-dev.bat`, then start a game.
+   the full stack is stopped; answer yes/no after each of the seven output
+   phases, then complete all six sensor cycles so exit code `0` is honest.
+   After it releases COM, start FastAPI, `ws_bridge`, and React with
+   `scripts\start-dev.bat`, then start a game.
 2. Follow the relevant parts of `ONSITE_LAN_INTEGRATION_PLAN.md` to set
    this machine's static IP, open the firewall port, and confirm it's
    reachable from another machine on the LAN if one is available to test

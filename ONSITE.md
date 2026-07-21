@@ -138,9 +138,10 @@ python games\test_hardware.py
 **Expected sequence:**
 1. Prints COM ports + grid dims from shelve
 2. Reports successful serial initialization
-3. Shows all six columns at once in six distinct colors
+3. Shows all six columns at once in six distinct colors, then prompts for a
+   yes/no confirmation (`yes` / `y` only when the physical lights match)
 4. Runs six one-column output phases; only columns 0, 1, 2, 3, 4, and 5
-   respectively should light
+   respectively should light, each followed by the same yes/no confirmation
 5. Opens a 15-second input window by default. For each column 0..5, start
    released, press it, then release it; the script reports `CYCLE COMPLETE`
    only after that full post-baseline cycle
@@ -153,13 +154,15 @@ Output and input durations are configurable:
 python games\test_hardware.py --output-duration 2 --input-duration 30
 ```
 
-From `games\`, omit the `games\` prefix. Exit code `0` means all six cycles
-completed; `1` means one or more cycles were missing **or** an unexpected
-runtime error occurred; `2` means configuration, serial-initialization, or
-timing validation failed; `130` means interrupted. Pre-layout validation
-touches no floor. After layout/diagnostic initialization is entered, cleanup
-attempts to blank the floor and close serial. Do not assume every possible
-CLI exit can blank hardware.
+From `games\`, omit the `games\` prefix. Exit code `0` means all seven
+output phases were manually confirmed **and** all six input cycles
+completed; `1` means one or more output confirmations failed, one or more
+input cycles were missing, **or** an unexpected runtime error occurred; `2`
+means configuration, serial-initialization, or timing validation failed;
+`130` means interrupted. Pre-layout validation touches no floor. After
+layout/diagnostic initialization is entered, cleanup attempts to blank the
+floor and close serial. Do not assume every possible CLI exit can blank
+hardware.
 
 **If `Serial initialization passed.` but no lights:** check cable from controller box to floor tiles. Check power to floor controller.
 

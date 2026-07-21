@@ -9,13 +9,23 @@ import shelve
 import sys
 import time
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_GAMES_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_GAMES_DIR)
+sys.path.insert(0, _GAMES_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from led import led_control
+from hardware_config import (
+    HardwareConfigError,
+    parse_dimension as shared_parse_dimension,
+    validate_com_info,
+    validate_hardware_config as shared_validate_hardware_config,
+    validate_platform_config,
+)
 
-SHELVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'setting', 'led_parameter')
+SHELVE = os.path.join(_GAMES_DIR, 'setting', 'led_parameter')
 DEFAULT_ROWS, DEFAULT_COLS = 1, 6
 EXPECTED_COORDINATES = tuple((0, column) for column in range(DEFAULT_COLS))
 BLACK = [0, 0, 0]
@@ -46,98 +56,67 @@ class HardwareConfig:
     cols: int
 
 
-def _normalize_coordinate(coordinate):
-    if (
-        not isinstance(coordinate, (list, tuple))
-        or len(coordinate) != 2
-        or not all(isinstance(value, int) and not isinstance(value, bool) for value in coordinate)
-    ):
-        raise DiagnosticConfigError(
-            f"Invalid no-use coordinate {coordinate!r}; expected integer (row, col)"
-        )
-    return tuple(coordinate)
-
-
 def parse_dimension(value, field_name):
     """Parse a positive, finite, integer-valued hardware dimension."""
-    if isinstance(value, bool):
-        raise DiagnosticConfigError(
-            f"{field_name} must be a finite positive integer, got {value!r}"
-        )
     try:
-        numeric = Decimal(str(value).strip())
-    except (InvalidOperation, ValueError) as error:
-        raise DiagnosticConfigError(
-            f"{field_name} must be a finite positive integer, got {value!r}"
-        ) from error
-    if (
-        not numeric.is_finite()
-        or numeric <= 0
-        or numeric != numeric.to_integral_value()
-    ):
-        raise DiagnosticConfigError(
-            f"{field_name} must be a finite positive integer, got {value!r}"
-        )
-    return int(numeric)
+        return shared_parse_dimension(value, field_name)
+    except HardwareConfigError as error:
+        raise DiagnosticConfigError(str(error)) from error
 
 
 def validate_hardware_config(rows, cols, no_use):
     """Require the exact Hoops matrix and all six enabled physical columns."""
     try:
-        rows = parse_dimension(rows, "rows")
-        cols = parse_dimension(cols, "cols")
-    except DiagnosticConfigError as error:
+        validate_platform_config(rows, cols, no_use)
+    except HardwareConfigError as error:
+        message = str(error)
+        if "disabled" in message and "(0, 5)" in message:
+            raise DiagnosticConfigError(
+                "Expected hoop column (0, 5) is disabled by no-use configuration"
+            ) from error
+        if "disabled" in message:
+            raise DiagnosticConfigError(message) from error
         raise DiagnosticConfigError(
-            f"Hoops hardware must be exactly 1x6; {error}"
+            f"Hoops hardware must be exactly 1x6; {message}"
+            if "exactly 1x6" not in message
+            else message
         ) from error
-    if (rows, cols) != (DEFAULT_ROWS, DEFAULT_COLS):
-        raise DiagnosticConfigError(
-            f"Hoops hardware must be exactly 1x6; configured {rows}x{cols}"
-        )
-
-    disabled = set()
-    for coordinate in no_use or []:
-        normalized = _normalize_coordinate(coordinate)
-        if normalized not in EXPECTED_COORDINATES:
-            raise DiagnosticConfigError(
-                f"No-use coordinate {normalized} is outside the 1x6 Hoops matrix"
-            )
-        disabled.add(normalized)
-
-    if disabled:
-        sixth = (0, 5)
-        if sixth in disabled:
-            raise DiagnosticConfigError(
-                f"Expected hoop column {sixth} is disabled by no-use configuration"
-            )
-        raise DiagnosticConfigError(
-            "Expected hoop column(s) disabled by no-use configuration: "
-            + ", ".join(map(str, sorted(disabled)))
-        )
 
 
 def load_hardware_config(settings_path=SHELVE):
     db = shelve.open(settings_path, flag="r")
     try:
         try:
-            config = HardwareConfig(
-                com_info=db.get("list_com_info", []),
-                layout_type=int(db.get("led_layout_type", 0)),
-                no_use=db.get("floor_layout_coors_no_use", []),
-                rows=parse_dimension(
-                    db.get("value_high", DEFAULT_ROWS), "value_high"
-                ),
-                cols=parse_dimension(
-                    db.get("value_width", DEFAULT_COLS), "value_width"
-                ),
+            rows = parse_dimension(
+                db.get("value_high", DEFAULT_ROWS), "value_high"
             )
+            cols = parse_dimension(
+                db.get("value_width", DEFAULT_COLS), "value_width"
+            )
+            validated = shared_validate_hardware_config(
+                rows,
+                cols,
+                db.get("floor_layout_coors_no_use", []),
+                db.get("led_layout_type", 0),
+                db.get("list_com_info", []),
+            )
+            config = HardwareConfig(
+                com_info=validated["com_info"],
+                layout_type=validated["layout_type"],
+                no_use=validated["no_use"],
+                rows=validated["rows"],
+                cols=validated["cols"],
+            )
+        except DiagnosticConfigError:
+            raise
+        except HardwareConfigError as error:
+            raise DiagnosticConfigError(str(error)) from error
         except (TypeError, ValueError) as error:
             raise DiagnosticConfigError(
                 f"Hardware settings contain non-numeric dimensions or layout: {error}"
             ) from error
     finally:
         db.close()
-    validate_hardware_config(config.rows, config.cols, config.no_use)
     return config
 
 
@@ -213,6 +192,19 @@ def _send_phase(
         sleep(min(repeat_interval, remaining))
 
 
+def confirm_output_phase(prompt):
+    """Ask an operator to confirm one output phase.
+
+    Only ``yes`` / ``y`` (any case) counts as pass. Blank input, other text,
+    and EOF all fail. Never auto-passes.
+    """
+    try:
+        answer = input(prompt).strip().lower()
+    except EOFError:
+        return False
+    return answer in {"yes", "y"}
+
+
 def run_output_matrix(
     driver,
     layout_type,
@@ -221,6 +213,7 @@ def run_output_matrix(
     monotonic=time.monotonic,
     sleep=time.sleep,
     output=sys.stdout,
+    confirm=confirm_output_phase,
 ):
     timings = validate_timing_arguments(
         output_duration=phase_duration, repeat_interval=repeat_interval
@@ -228,36 +221,45 @@ def run_output_matrix(
     phase_duration = timings["output_duration"]
     repeat_interval = timings["repeat_interval"]
 
-    print(
-        "OUTPUT all columns: verify six distinct colors, including column 5",
-        file=output,
-    )
-    _send_phase(
-        driver,
-        layout_type,
-        all_columns_pattern(),
-        phase_duration,
-        repeat_interval,
-        monotonic,
-        sleep,
-    )
-    print("  SENT all-six color phase", file=output)
-
-    for column in range(DEFAULT_COLS):
-        print(
-            f"OUTPUT column {column}: only physical (0,{column}) should be lit",
-            file=output,
+    phases = [
+        (
+            "OUTPUT all columns: verify six distinct colors, including column 5",
+            all_columns_pattern(),
+            "Confirm all six distinct colors are visible (yes/no): ",
         )
+    ]
+    for column in range(DEFAULT_COLS):
+        phases.append(
+            (
+                f"OUTPUT column {column}: only physical (0,{column}) should be lit",
+                single_column_pattern(column),
+                f"Confirm only column {column} is lit (yes/no): ",
+            )
+        )
+
+    all_confirmed = True
+    for description, pattern, prompt in phases:
+        print(description, file=output)
         _send_phase(
             driver,
             layout_type,
-            single_column_pattern(column),
+            pattern,
             phase_duration,
             repeat_interval,
             monotonic,
             sleep,
         )
-        print(f"  SENT column {column} phase", file=output)
+        if "all columns" in description:
+            print("  SENT all-six color phase", file=output)
+        else:
+            column = description.split("column ", 1)[1].split(":", 1)[0]
+            print(f"  SENT column {column} phase", file=output)
+        if confirm(prompt):
+            print("OUTPUT MANUAL PASS", file=output)
+        else:
+            all_confirmed = False
+            print("OUTPUT MANUAL FAIL", file=output)
+    return all_confirmed
 
 
 def run_input_matrix(
@@ -360,6 +362,7 @@ def run_diagnostic(
     monotonic=time.monotonic,
     sleep=time.sleep,
     output=sys.stdout,
+    confirm_output=confirm_output_phase,
 ):
     timings = validate_timing_arguments(
         output_duration=output_duration,
@@ -372,6 +375,10 @@ def run_diagnostic(
     repeat_interval = timings["repeat_interval"]
     poll_interval = timings["poll_interval"]
     validate_hardware_config(config.rows, config.cols, config.no_use)
+    try:
+        validate_com_info(config.com_info)
+    except HardwareConfigError as error:
+        raise DiagnosticConfigError(str(error)) from error
     layout_ready = False
     serial_usable = False
     try:
@@ -397,7 +404,7 @@ def run_diagnostic(
             return 2
         print("Serial initialization passed.", file=output)
 
-        run_output_matrix(
+        output_ok = run_output_matrix(
             driver,
             config.layout_type,
             phase_duration=output_duration,
@@ -405,6 +412,7 @@ def run_diagnostic(
             monotonic=monotonic,
             sleep=sleep,
             output=output,
+            confirm=confirm_output,
         )
         complete = run_input_matrix(
             driver,
@@ -415,7 +423,7 @@ def run_diagnostic(
             sleep=sleep,
             output=output,
         )
-        return 0 if complete else 1
+        return 0 if (output_ok and complete) else 1
     finally:
         if layout_ready:
             _blank_floor(

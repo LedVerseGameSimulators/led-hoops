@@ -91,7 +91,7 @@ should work, but it has never been run against real hardware.
 Run from the repository root:
 
 ```cmd
-python -m unittest tests.test_level_scaling tests.test_level_preparation tests.test_hoop6_gameplay tests.test_hardware_diagnostic tests.test_hardware_boot
+python -m unittest tests.test_level_scaling tests.test_level_preparation tests.test_hoop6_gameplay tests.test_hardware_config tests.test_hardware_diagnostic tests.test_hardware_boot
 ```
 
 The passing suite covers:
@@ -132,19 +132,26 @@ Run these in order. Record pass/fail for each — don't just say "done."
       the Windows repository root run
       `python games\test_hardware.py`; from `games\`, run
       `python test_hardware.py`. It sends all six distinct colors, then six
-      one-column-only output phases. During the default 15-second input
-      window, every column 0..5 must be observed released as a baseline, then
-      pressed, then released. Durations are configurable, for example:
+      one-column-only output phases, and **prompts for a yes/no confirmation
+      after each of those seven output phases**. Answer `yes` / `y` only when
+      the physical lights match; blank/EOF/any other answer counts as fail.
+      During the default 15-second input window, every column 0..5 must then
+      complete a released baseline → press → release cycle. Durations are
+      configurable, for example:
       `python games\test_hardware.py --output-duration 2 --input-duration 30`
       from root, or the equivalent `python test_hardware.py ...` from
       `games\`.
-      Exit codes are `0` complete; `1` means one or more input cycles were
-      missing **or** an unexpected runtime error occurred; `2` means
-      configuration, serial-initialization, or timing validation failed; and
-      `130` means interrupted. Pre-layout validation touches no floor. After
+      Exit codes are `0` only when **all seven output phases are manually
+      confirmed and all six input cycles complete**; `1` means one or more
+      output confirmations failed, one or more input cycles were missing, or
+      an unexpected runtime error occurred; `2` means configuration,
+      serial-initialization, or timing validation failed; and `130` means
+      interrupted. Pre-layout validation touches no floor. After
       layout/diagnostic initialization is entered, cleanup attempts to blank
       the floor and close serial; do not interpret this as a guarantee that
-      every possible CLI exit can blank hardware.
+      every possible CLI exit can blank hardware. Automated tests validate
+      frame buffers and confirmation plumbing; physical output remains
+      onsite PENDING.
 - [ ] **Start the complete stack:** After the standalone diagnostic releases
       COM, run `scripts\start-dev.bat` from the repository root. This starts
       FastAPI (8000), `ws_bridge` (8765), and React (5173), with the API in

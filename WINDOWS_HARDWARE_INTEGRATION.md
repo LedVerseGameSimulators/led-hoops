@@ -57,16 +57,19 @@ python games\test_hardware.py
 ```
 
 From `games\`, use `python test_hardware.py`. Expected: an all-six
-distinct-color phase, six one-column-only phases, then a default 15-second
-input window. Each column 0..5 requires a released baseline → press → release
-cycle.
-Exit codes are `0` complete; `1` means one or more cycles are missing or an
+distinct-color phase, six one-column-only phases (each followed by a
+manual yes/no confirmation), then a default 15-second input window. Each
+column 0..5 requires a released baseline → press → release cycle.
+Exit codes are `0` only when all seven output phases are manually confirmed
+and all six input cycles complete; `1` means one or more output
+confirmations failed, one or more input cycles are missing, or an
 unexpected runtime error occurred; `2` means configuration,
 serial-initialization, or timing validation failed; and `130` means
 interrupted. Pre-layout validation touches no floor. Blank/close cleanup is
 attempted after entering layout/diagnostic initialization; it is not a
-guarantee for every possible CLI exit. Durations are configurable, for
-example:
+guarantee for every possible CLI exit. Automated tests cover buffers and
+confirmation plumbing; physical lights remain onsite PENDING. Durations are
+configurable, for example:
 
 ```cmd
 python games\test_hardware.py --output-duration 2 --input-duration 30
@@ -76,7 +79,7 @@ Automated software evidence (run from the repository root; this does not
 replace physical validation):
 
 ```cmd
-python -m unittest tests.test_level_scaling tests.test_level_preparation tests.test_hoop6_gameplay tests.test_hardware_diagnostic tests.test_hardware_boot
+python -m unittest tests.test_level_scaling tests.test_level_preparation tests.test_hoop6_gameplay tests.test_hardware_config tests.test_hardware_diagnostic tests.test_hardware_boot
 ```
 
 ---
