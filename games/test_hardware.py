@@ -1,14 +1,15 @@
-"""
-Hoops hardware diagnostic.
-Run from led-hoops/games/: python test_hardware.py
+"""Six-column output/input diagnostic for Hoops hardware.
 
-Sends all-green to the floor for 3s, then reads sensors for 5s.
-Expected: 6 hoop columns light up green; stepping on a tile prints a PRESS line.
+Run from ``led-hoops/games`` with ``python test_hardware.py``.
 """
-import sys
+import argparse
+import math
 import os
-import time
 import shelve
+import sys
+import time
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,56 +17,476 @@ from led import led_control
 
 SHELVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'setting', 'led_parameter')
 DEFAULT_ROWS, DEFAULT_COLS = 1, 6
+EXPECTED_COORDINATES = tuple((0, column) for column in range(DEFAULT_COLS))
+BLACK = [0, 0, 0]
+COLUMN_COLORS = (
+    [254, 0, 0],
+    [0, 254, 0],
+    [0, 80, 254],
+    [254, 180, 0],
+    [180, 0, 254],
+    [0, 254, 254],
+)
 
 
-def main():
-    print("=== Hoops Hardware Test ===")
-    print(f"Reading shelve: {SHELVE}")
-    db = shelve.open(SHELVE, flag='r')
-    list_com_info = db.get('list_com_info', [])
-    layout_type   = int(db.get('led_layout_type', 0))
-    no_use        = db.get('floor_layout_coors_no_use', [])
-    rows          = int(float(db.get('value_high', DEFAULT_ROWS)))
-    cols          = int(float(db.get('value_width', DEFAULT_COLS)))
-    db.close()
-    print(f"  COM ports : {list_com_info}")
-    print(f"  Grid      : {rows}x{cols}  layout={layout_type}")
+class DiagnosticConfigError(ValueError):
+    """Raised when settings cannot describe the six physical hoops."""
 
-    led_control.init_layout(layout_type, rows, cols, no_use)
-    errors = led_control.init_com(list_com_info)
-    if errors:
-        print(f"  WARNING: failed to open port(s): {errors}")
-    else:
-        print("  All COM ports opened OK")
 
-    green = [0, 254, 0]
-    led_2d = [[green[:] for _ in range(cols)] for _ in range(rows)]
-    print("Sending green pattern for 3s — check floor lights up...")
-    t0 = time.time()
-    while time.time() - t0 < 3:
-        led_control.draw_screen_by_com(layout_type, led_2d)
-        time.sleep(0.05)
+class DiagnosticTimingError(ValueError):
+    """Raised when a diagnostic timing argument is unsafe."""
 
-    state_table = [[False] * cols for _ in range(rows)]
-    print("Reading sensors for 5s — step on tiles to test...")
-    t0 = time.time()
-    pressed = set()
-    while time.time() - t0 < 5:
-        led_control.update_screen_state_by_com(layout_type, state_table, state_table)
-        for r in range(rows):
-            for c in range(cols):
-                if state_table[r][c] and (r, c) not in pressed:
-                    pressed.add((r, c))
-                    print(f"  PRESS detected: row={r} col={c}")
-        time.sleep(0.01)
 
-    print(f"\nResult: {len(pressed)} unique tile(s) pressed: {sorted(pressed)}")
+@dataclass(frozen=True)
+class HardwareConfig:
+    com_info: list
+    layout_type: int
+    no_use: list
+    rows: int
+    cols: int
 
-    black = [0, 0, 0]
-    black_2d = [[black[:] for _ in range(cols)] for _ in range(rows)]
-    led_control.draw_screen_by_com(layout_type, black_2d)
-    print("Floor cleared. Done.")
+
+def _normalize_coordinate(coordinate):
+    if (
+        not isinstance(coordinate, (list, tuple))
+        or len(coordinate) != 2
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in coordinate)
+    ):
+        raise DiagnosticConfigError(
+            f"Invalid no-use coordinate {coordinate!r}; expected integer (row, col)"
+        )
+    return tuple(coordinate)
+
+
+def parse_dimension(value, field_name):
+    """Parse a positive, finite, integer-valued hardware dimension."""
+    if isinstance(value, bool):
+        raise DiagnosticConfigError(
+            f"{field_name} must be a finite positive integer, got {value!r}"
+        )
+    try:
+        numeric = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as error:
+        raise DiagnosticConfigError(
+            f"{field_name} must be a finite positive integer, got {value!r}"
+        ) from error
+    if (
+        not numeric.is_finite()
+        or numeric <= 0
+        or numeric != numeric.to_integral_value()
+    ):
+        raise DiagnosticConfigError(
+            f"{field_name} must be a finite positive integer, got {value!r}"
+        )
+    return int(numeric)
+
+
+def validate_hardware_config(rows, cols, no_use):
+    """Require the exact Hoops matrix and all six enabled physical columns."""
+    try:
+        rows = parse_dimension(rows, "rows")
+        cols = parse_dimension(cols, "cols")
+    except DiagnosticConfigError as error:
+        raise DiagnosticConfigError(
+            f"Hoops hardware must be exactly 1x6; {error}"
+        ) from error
+    if (rows, cols) != (DEFAULT_ROWS, DEFAULT_COLS):
+        raise DiagnosticConfigError(
+            f"Hoops hardware must be exactly 1x6; configured {rows}x{cols}"
+        )
+
+    disabled = set()
+    for coordinate in no_use or []:
+        normalized = _normalize_coordinate(coordinate)
+        if normalized not in EXPECTED_COORDINATES:
+            raise DiagnosticConfigError(
+                f"No-use coordinate {normalized} is outside the 1x6 Hoops matrix"
+            )
+        disabled.add(normalized)
+
+    if disabled:
+        sixth = (0, 5)
+        if sixth in disabled:
+            raise DiagnosticConfigError(
+                f"Expected hoop column {sixth} is disabled by no-use configuration"
+            )
+        raise DiagnosticConfigError(
+            "Expected hoop column(s) disabled by no-use configuration: "
+            + ", ".join(map(str, sorted(disabled)))
+        )
+
+
+def load_hardware_config(settings_path=SHELVE):
+    db = shelve.open(settings_path, flag="r")
+    try:
+        try:
+            config = HardwareConfig(
+                com_info=db.get("list_com_info", []),
+                layout_type=int(db.get("led_layout_type", 0)),
+                no_use=db.get("floor_layout_coors_no_use", []),
+                rows=parse_dimension(
+                    db.get("value_high", DEFAULT_ROWS), "value_high"
+                ),
+                cols=parse_dimension(
+                    db.get("value_width", DEFAULT_COLS), "value_width"
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            raise DiagnosticConfigError(
+                f"Hardware settings contain non-numeric dimensions or layout: {error}"
+            ) from error
+    finally:
+        db.close()
+    validate_hardware_config(config.rows, config.cols, config.no_use)
+    return config
+
+
+def _copy_pattern(pattern):
+    return [[list(color) for color in row] for row in pattern]
+
+
+def all_columns_pattern():
+    return [[list(color) for color in COLUMN_COLORS]]
+
+
+def single_column_pattern(column):
+    if column not in range(DEFAULT_COLS):
+        raise ValueError(f"Hoop column must be 0..5, got {column}")
+    row = [BLACK[:] for _ in range(DEFAULT_COLS)]
+    row[column] = list(COLUMN_COLORS[column])
+    return [row]
+
+
+def validate_timing_arguments(**arguments):
+    """Validate supplied diagnostic durations and intervals before I/O."""
+    rules = {
+        "output_duration": True,
+        "input_duration": True,
+        "repeat_interval": False,
+        "poll_interval": False,
+    }
+    unknown = set(arguments) - set(rules)
+    if unknown:
+        raise TypeError(f"Unknown timing argument(s): {sorted(unknown)}")
+
+    validated = {}
+    for name, value in arguments.items():
+        if isinstance(value, bool):
+            raise DiagnosticTimingError(f"{name} must be a finite number")
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise DiagnosticTimingError(
+                f"{name} must be a finite number"
+            ) from error
+        allow_zero = rules[name]
+        valid_range = numeric >= 0 if allow_zero else numeric > 0
+        if not math.isfinite(numeric) or not valid_range:
+            qualifier = "nonnegative" if allow_zero else "positive"
+            raise DiagnosticTimingError(
+                f"{name} must be a finite {qualifier} number"
+            )
+        validated[name] = numeric
+    return validated
+
+
+def _send_phase(
+    driver,
+    layout_type,
+    pattern,
+    duration,
+    repeat_interval,
+    monotonic,
+    sleep,
+):
+    timings = validate_timing_arguments(
+        output_duration=duration, repeat_interval=repeat_interval
+    )
+    duration = timings["output_duration"]
+    repeat_interval = timings["repeat_interval"]
+    started = monotonic()
+    while True:
+        driver.draw_screen_by_com(layout_type, _copy_pattern(pattern))
+        remaining = duration - (monotonic() - started)
+        if remaining <= 0:
+            return
+        sleep(min(repeat_interval, remaining))
+
+
+def run_output_matrix(
+    driver,
+    layout_type,
+    phase_duration=1.0,
+    repeat_interval=0.05,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+    output=sys.stdout,
+):
+    timings = validate_timing_arguments(
+        output_duration=phase_duration, repeat_interval=repeat_interval
+    )
+    phase_duration = timings["output_duration"]
+    repeat_interval = timings["repeat_interval"]
+
+    print(
+        "OUTPUT all columns: verify six distinct colors, including column 5",
+        file=output,
+    )
+    _send_phase(
+        driver,
+        layout_type,
+        all_columns_pattern(),
+        phase_duration,
+        repeat_interval,
+        monotonic,
+        sleep,
+    )
+    print("  SENT all-six color phase", file=output)
+
+    for column in range(DEFAULT_COLS):
+        print(
+            f"OUTPUT column {column}: only physical (0,{column}) should be lit",
+            file=output,
+        )
+        _send_phase(
+            driver,
+            layout_type,
+            single_column_pattern(column),
+            phase_duration,
+            repeat_interval,
+            monotonic,
+            sleep,
+        )
+        print(f"  SENT column {column} phase", file=output)
+
+
+def run_input_matrix(
+    driver,
+    layout_type,
+    duration=15.0,
+    poll_interval=0.01,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+    output=sys.stdout,
+):
+    timings = validate_timing_arguments(
+        input_duration=duration, poll_interval=poll_interval
+    )
+    duration = timings["input_duration"]
+    poll_interval = timings["poll_interval"]
+
+    print(
+        "INPUT: release, press, and release every hoop column 0..5",
+        file=output,
+    )
+    state = [[None] * DEFAULT_COLS]
+    previous = [None] * DEFAULT_COLS
+    armed = [False] * DEFAULT_COLS
+    pressed_after_arming = [False] * DEFAULT_COLS
+    completed = set()
+    started = monotonic()
+    remaining = duration
+
+    while remaining > 0:
+        driver.update_screen_state_by_com(layout_type, state, state)
+        for column in range(DEFAULT_COLS):
+            coordinate = (0, column)
+            raw_value = state[0][column]
+            if raw_value is None:
+                continue
+            current_value = bool(raw_value)
+            previous_value = previous[column]
+            if previous_value is None:
+                if current_value:
+                    print(
+                        f"  BASELINE HELD (0,{column}); release to arm",
+                        file=output,
+                    )
+                else:
+                    armed[column] = True
+                    print(f"  ARMED (0,{column}); baseline released", file=output)
+                previous[column] = current_value
+                continue
+
+            if current_value and not previous_value:
+                if armed[column]:
+                    pressed_after_arming[column] = True
+                    print(f"  PRESS (0,{column})", file=output)
+            elif previous_value and not current_value:
+                print(f"  RELEASE (0,{column})", file=output)
+                if pressed_after_arming[column]:
+                    completed.add(coordinate)
+                    pressed_after_arming[column] = False
+                    print(f"  CYCLE COMPLETE (0,{column})", file=output)
+                else:
+                    armed[column] = True
+                    print(f"  ARMED (0,{column}); released", file=output)
+            previous[column] = current_value
+        remaining = duration - (monotonic() - started)
+        if remaining > 0:
+            sleep(min(poll_interval, remaining))
+
+    print("INPUT RESULT", file=output)
+    for coordinate in EXPECTED_COORDINATES:
+        status = "PASS" if coordinate in completed else "MISSING"
+        print(f"  {coordinate}: {status}", file=output)
+    return completed == set(EXPECTED_COORDINATES)
+
+
+def _blank_floor(driver, layout_type, output, serial_usable=True):
+    try:
+        driver.draw_screen_by_com(
+            layout_type, [[BLACK[:] for _ in range(DEFAULT_COLS)]]
+        )
+        if serial_usable:
+            print("Floor blanked.", file=output)
+        else:
+            print(
+                "Floor blank command attempted; serial was not usable, "
+                "so delivery is unconfirmed.",
+                file=output,
+            )
+    except Exception as error:
+        print(f"WARNING: failed to blank floor: {error}", file=output)
+
+
+def run_diagnostic(
+    config,
+    driver=led_control,
+    output_duration=1.0,
+    input_duration=15.0,
+    repeat_interval=0.05,
+    poll_interval=0.01,
+    monotonic=time.monotonic,
+    sleep=time.sleep,
+    output=sys.stdout,
+):
+    timings = validate_timing_arguments(
+        output_duration=output_duration,
+        input_duration=input_duration,
+        repeat_interval=repeat_interval,
+        poll_interval=poll_interval,
+    )
+    output_duration = timings["output_duration"]
+    input_duration = timings["input_duration"]
+    repeat_interval = timings["repeat_interval"]
+    poll_interval = timings["poll_interval"]
+    validate_hardware_config(config.rows, config.cols, config.no_use)
+    layout_ready = False
+    serial_usable = False
+    try:
+        print("=== Hoops Six-Column Hardware Diagnostic ===", file=output)
+        print(
+            f"Grid {config.rows}x{config.cols}; layout={config.layout_type}; "
+            f"COM={config.com_info}",
+            file=output,
+        )
+        layout_ready = True
+        driver.init_layout(
+            config.layout_type, config.rows, config.cols, config.no_use
+        )
+        serial_errors = driver.init_com(config.com_info)
+        serial_open = bool(getattr(driver, "g_has_open", False))
+        serial_usable = bool(config.com_info and serial_open and not serial_errors)
+        if not serial_usable:
+            print(
+                "ERROR: serial initialization failed"
+                + (f" for {serial_errors}" if serial_errors else ""),
+                file=output,
+            )
+            return 2
+        print("Serial initialization passed.", file=output)
+
+        run_output_matrix(
+            driver,
+            config.layout_type,
+            phase_duration=output_duration,
+            repeat_interval=repeat_interval,
+            monotonic=monotonic,
+            sleep=sleep,
+            output=output,
+        )
+        complete = run_input_matrix(
+            driver,
+            config.layout_type,
+            duration=input_duration,
+            poll_interval=poll_interval,
+            monotonic=monotonic,
+            sleep=sleep,
+            output=output,
+        )
+        return 0 if complete else 1
+    finally:
+        if layout_ready:
+            _blank_floor(
+                driver,
+                config.layout_type,
+                output,
+                serial_usable=serial_usable,
+            )
+        try:
+            driver.close_com()
+        except Exception as error:
+            print(f"WARNING: failed to close serial connection: {error}", file=output)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--settings", default=SHELVE, help="led_parameter shelve path")
+    parser.add_argument(
+        "--output-duration",
+        type=float,
+        default=1.0,
+        help="seconds for each of seven output phases",
+    )
+    parser.add_argument(
+        "--input-duration",
+        type=float,
+        default=15.0,
+        help="seconds to observe all six input columns",
+    )
+    parser.add_argument(
+        "--repeat-interval",
+        type=float,
+        default=0.05,
+        help="seconds between repeated output frames",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0.01,
+        help="seconds between sensor reads",
+    )
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        timings = validate_timing_arguments(
+            output_duration=args.output_duration,
+            input_duration=args.input_duration,
+            repeat_interval=args.repeat_interval,
+            poll_interval=args.poll_interval,
+        )
+        config = load_hardware_config(args.settings)
+        return run_diagnostic(
+            config,
+            **timings,
+        )
+    except DiagnosticTimingError as error:
+        print(f"ARGUMENT ERROR: {error}", file=sys.stderr)
+        return 2
+    except DiagnosticConfigError as error:
+        print(f"CONFIG ERROR: {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\nDiagnostic interrupted.", file=sys.stderr)
+        return 130
+    except Exception as error:
+        print(f"DIAGNOSTIC ERROR: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

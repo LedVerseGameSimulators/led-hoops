@@ -10,7 +10,7 @@
 |-----|-------|
 | Game | LED Hoops |
 | Grid | 1 row × 6 cols |
-| COM ports | 1 (read from shelve — see Step 5) |
+| COM ports | 1 (read from shelve — see Step 4) |
 | Layout type | read from shelve |
 | Display var | `led_display` |
 | Zip extract dir | `C:\activerse\led-hoops` |
@@ -27,7 +27,8 @@
    C:\activerse\led-hoops\
      api\
      games\
-     requirements.txt
+     frontend\
+     scripts\
      ...
    ```
 3. Open **Command Prompt as Administrator** (Start → cmd → right-click → Run as administrator). Use this terminal for all remaining steps.
@@ -65,16 +66,19 @@ Both must respond before continuing.
 
 ```cmd
 cd C:\activerse\led-hoops
-pip install -r requirements.txt
+pip install -r api\requirements.txt
+pip install pyserial httpx
 ```
 
 **Expected:** packages install without error. Ignore deprecation warnings.
 
-**If `pyserial` fails:** `pip install pyserial` manually.
+`pyserial` is required for floor COM access; `httpx` is required by the
+bridge/debug tooling.
 
 **If any package fails on Windows build tools:**
 ```cmd
-pip install --only-binary :all: -r requirements.txt
+pip install --only-binary :all: -r api\requirements.txt
+pip install pyserial httpx
 ```
 
 ---
@@ -94,7 +98,7 @@ python -c "import shelve; db=shelve.open('setting/led_parameter',flag='r'); [pri
 
 **If shelve missing or empty:** STOP — the `games/setting/led_parameter` shelve must exist. It was pre-populated from the original Windows machine. Do not proceed without it.
 
-Note the COM port name (e.g. `COM3`) — you'll need it in Step 6.
+Note the COM port name (e.g. `COM3`) — compare it with Windows in Step 5.
 
 ---
 
@@ -114,67 +118,93 @@ python -c "import serial.tools.list_ports; [print(p) for p in serial.tools.list_
 
 ## Step 6 — Run hardware diagnostic
 
+Run this standalone diagnostic **before** the full stack. Confirm that the
+API and any other process that could own the floor COM port are stopped.
+
+From `games\`:
+
 ```cmd
 cd C:\activerse\led-hoops\games
 python test_hardware.py
 ```
 
+The equivalent repository-root command is:
+
+```cmd
+cd C:\activerse\led-hoops
+python games\test_hardware.py
+```
+
 **Expected sequence:**
 1. Prints COM ports + grid dims from shelve
-2. `All COM ports opened OK`
-3. Floor lights up **green** for 3 seconds
-4. Prints `Reading sensors for 5s — step on tiles to test...`
-5. When you step on a tile: `PRESS detected: row=0 col=X`
-6. `Floor cleared. Done.`
+2. Reports successful serial initialization
+3. Shows all six columns at once in six distinct colors
+4. Runs six one-column output phases; only columns 0, 1, 2, 3, 4, and 5
+   respectively should light
+5. Opens a 15-second input window by default. For each column 0..5, start
+   released, press it, then release it; the script reports `CYCLE COMPLETE`
+   only after that full post-baseline cycle
+6. Prints a per-column `PASS`/`MISSING` result, blanks the floor, and closes
+   serial
 
-**If `All COM ports opened OK` but no lights:** check cable from controller box to floor tiles. Check power to floor controller.
+Output and input durations are configurable:
+
+```cmd
+python games\test_hardware.py --output-duration 2 --input-duration 30
+```
+
+From `games\`, omit the `games\` prefix. Exit code `0` means all six cycles
+completed; `1` means one or more cycles were missing **or** an unexpected
+runtime error occurred; `2` means configuration, serial-initialization, or
+timing validation failed; `130` means interrupted. Pre-layout validation
+touches no floor. After layout/diagnostic initialization is entered, cleanup
+attempts to blank the floor and close serial. Do not assume every possible
+CLI exit can blank hardware.
+
+**If `Serial initialization passed.` but no lights:** check cable from controller box to floor tiles. Check power to floor controller.
 
 **If COM port open error:** wrong COM port number, or port in use by another process. Check Device Manager for actual port name and update shelve if needed (see Troubleshooting).
 
 ---
 
-## Step 7 — Find the server start command
-
-```cmd
-dir C:\activerse\led-hoops\*.bat C:\activerse\led-hoops\*.cmd C:\activerse\led-hoops\start*.py 2>nul
-```
-
-If a `start.bat` or `run.bat` exists, inspect it first:
-```cmd
-type C:\activerse\led-hoops\start.bat
-```
-
-If no start script, use the manual command in Step 8.
-
----
-
-## Step 8 — Start game server with hardware enabled
+## Step 7 — Start all three services
 
 ```cmd
 cd C:\activerse\led-hoops
-set USE_SERIAL_HD=1
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+scripts\start-dev.bat
 ```
 
-**Expected startup log includes:**
+This opens three command windows:
+
+1. FastAPI on port 8000 with `USE_SERIAL_HD=1`
+2. `ws_bridge.py` on port 8765
+3. React/Vite on port 5173
+
+The standalone diagnostic must already have exited so the API can own COM.
+
+---
+
+## Step 8 — Start a game and verify hardware initialization
+
+1. Open `http://localhost:5173`.
+2. Start a game through the UI.
+3. Check the API command window.
+
+`_hw_init()` runs when the game starts, not when Uvicorn merely starts.
+After starting the game, the expected API log includes:
 ```
 Hardware ready: 1 port(s), 1×6, layout=X
 ```
 
-If you see `Hardware init failed: ...` — re-run Step 6 to diagnose serial issue before proceeding.
-
-**PowerShell alternative:**
-```powershell
-$env:USE_SERIAL_HD="1"
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
+If you see `Hardware init failed: ...`, stop all three services so the API
+releases COM, re-run Step 6, then restart at Step 7.
 
 ---
 
 ## Step 9 — Verify sim + hardware both working
 
-1. Server must be running (Step 8 terminal stays open)
-2. Open browser on this PC → `http://localhost:8000` (or simulator URL)
+1. All three services from Step 7 must remain running
+2. Open browser on this PC → `http://localhost:5173`
 3. Start a game through the UI
 4. Confirm: floor tiles receive color data (LEDs respond to game state)
 5. Confirm: stepping on a tile registers in the game (score or state change)
@@ -205,7 +235,8 @@ db.close()
 ```
 Only do this if Device Manager confirms COM port changed.
 
-**`ModuleNotFoundError` on startup:** run `pip install -r requirements.txt` again from the `led-hoops` directory.
+**`ModuleNotFoundError` on startup:** from the `led-hoops` directory run
+`pip install -r api\requirements.txt`, then `pip install pyserial httpx`.
 
 **Floor lights but no input (PRESS not detected):** sensor cable may be separate from LED cable. Confirm both data cables connected.
 

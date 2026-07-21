@@ -24,7 +24,8 @@ Quick start (Windows):
 C:\activerse\led-hoops\scripts\start-dev.bat
 ```
 
-Or three separate terminals — see `ONSITE.md` Step 8.
+Run the standalone diagnostic first, then start the stack; see `ONSITE.md`
+Steps 6–8.
 
 ---
 
@@ -48,12 +49,35 @@ npm install
 
 ### Hardware test (before full stack)
 
+From the repository root:
+
 ```cmd
-cd C:\activerse\led-hoops\games
-python test_hardware.py
+cd C:\activerse\led-hoops
+python games\test_hardware.py
 ```
 
-Expected: all 6 tiles green 3s, step detection, floor cleared.
+From `games\`, use `python test_hardware.py`. Expected: an all-six
+distinct-color phase, six one-column-only phases, then a default 15-second
+input window. Each column 0..5 requires a released baseline → press → release
+cycle.
+Exit codes are `0` complete; `1` means one or more cycles are missing or an
+unexpected runtime error occurred; `2` means configuration,
+serial-initialization, or timing validation failed; and `130` means
+interrupted. Pre-layout validation touches no floor. Blank/close cleanup is
+attempted after entering layout/diagnostic initialization; it is not a
+guarantee for every possible CLI exit. Durations are configurable, for
+example:
+
+```cmd
+python games\test_hardware.py --output-duration 2 --input-duration 30
+```
+
+Automated software evidence (run from the repository root; this does not
+replace physical validation):
+
+```cmd
+python -m unittest tests.test_level_scaling tests.test_level_preparation tests.test_hoop6_gameplay tests.test_hardware_diagnostic tests.test_hardware_boot
+```
 
 ---
 
@@ -69,7 +93,7 @@ Expected: all 6 tiles green 3s, step detection, floor cleared.
 | `simulator/static/index.html` | 1×6 hoop canvas (embedded in iframe) |
 | `scripts/start-dev.bat` | Starts all 3 services on Windows |
 | `scripts/debug_sim.py` | API test: start game, poll `led_display` |
-| `games/test_hardware.py` | COM open, green pattern, sensor read |
+| `games/test_hardware.py` | Six-column output/input matrix and cleanup |
 | `ONSITE.md` | Step-by-step onsite guide |
 | `WINDOWS_HARDWARE_INTEGRATION.md` | This document |
 
@@ -79,17 +103,21 @@ Expected: all 6 tiles green 3s, step detection, floor cleared.
 - **`USE_SERIAL_HD=1`**: Enables real serial via `games/led/led_control.py`.
 - **`_hw_init()`**: Opens COM ports from `games/setting/led_parameter` shelve, calls `init_layout` + `init_com`.
 - **Per-frame callback**: Builds `led_display` (6 RGB values), scores input, updates game state for API/simulator.
-- **Hardware I/O** (each frame when `USE_SERIAL_HD=1`):
+- **Hardware I/O** (each throttled hardware frame when `USE_SERIAL_HD=1`):
   - `draw_screen_by_com()` — send colors to floor
-  - `update_screen_state_by_com()` every 3rd frame — read step sensors
-- **`_setup_level()` fix**: Level files are 1×5 but hardware is 1×6. LED table is **never shrunk below** shelve `value_width` (6):
-
-  ```python
-  lr = max(lr, _hw_rows)
-  lc = max(lc, _hw_cols)
-  ```
-
-  Without this, `draw_screen_by_com` hits `IndexError` and the API can crash.
+  - `update_screen_state_by_com()` — read step sensors immediately after
+    that frame's draw
+  - Runtime draw/read/blank operations share one serial lock; `_hw_init()`
+    does not run under that runtime lock.
+- **Source-parity level preparation**: Each fresh five-column archive is
+  scaled once, before setup, to configured `grid_rows` × `grid_cols`
+  dimensions. For `group.scale='both'`, columns map `0→0`, `1→1`,
+  `2→{2,3}`, `3→4`, `4→5`. `group.scale='none'` uses source `none2edge`
+  behavior:
+  `0→0`, `1→1`, `2→2`, `3→4`, `4→5`; zone/activity end `5→6`.
+  Simulator, hardware, scoring, and movement then use physical coordinates
+  directly, with no inverse remap. This replaces the old minimum-width
+  padding description.
 
 - **Mock imports**: When `USE_SERIAL_HD=0`, tkinter/serial are mocked so sim-only mode works without hardware.
 
@@ -169,11 +197,20 @@ python -c "import shelve; db=shelve.open('setting/led_parameter',flag='r'); prin
 
 ### 6th hoop (column index 5)
 
-- Level files (`.led`) are authored for **5 columns** (0–4).
-- Hardware has **6 columns** (0–5).
-- With current (reverted) code: **hoops 1–5 work**, **6th hoop stays dark** during gameplay.
-- `test_hardware.py` proves the 6th tile works electrically.
-- A future fix needs **minimal mapping** (only stretch last level column → hardware col 5) without remapping cols 0–3.
+- **Implemented and automated-verified; onsite revalidation pending.**
+- Root cause: five-column archive geometry was placed in a six-column minimum
+  table without source scaling, so affected groups did not populate physical
+  column 5.
+- The definitive source mappings and exactly-once fresh-load lifecycle are in
+  §3.2. All downstream systems use the resulting physical 1×6 coordinates.
+- The old ad-hoc `_scale_level_to_hardware` attempt was reverted because it
+  differed from source behavior and caused fourth/fifth-hoop and simulator
+  regressions. That historical attempt is not the current implementation.
+- Automated tests cover mappings; real levels `001`, `003`, `007`, `DK01`,
+  and `DK03`; 1×6 display/hardware serialization; simulator and fake-sensor
+  column-5 scoring; goal/red/deduct/moving/two-player/restart behavior; and
+  the diagnostic. Physical lights, sensors, gameplay, marathon/restart, and
+  blank-on-stop remain onsite checks.
 
 ### API crash on serial
 
@@ -192,13 +229,16 @@ python -c "import shelve; db=shelve.open('setting/led_parameter',flag='r'); prin
 
 1. Extract zip to `C:\activerse\led-hoops`
 2. Install Python 3.11 + Node.js LTS
-3. `pip install -r api\requirements.txt` + `pyserial httpx`
+3. Run `pip install -r api\requirements.txt`, then
+   `pip install pyserial httpx`
 4. `cd frontend && npm install`
 5. Copy **`games/setting/led_parameter`** from original machine if not in zip
 6. Install WCH driver, verify COM port in Device Manager
-7. Run `python games\test_hardware.py`
+7. Run `python games\test_hardware.py` and require all six output positions
+   plus all six released → pressed → released input cycles
 8. Run `scripts\start-dev.bat`
-9. Open http://localhost:5173 → Guest → play
+9. Open http://localhost:5173 → Guest → start a game; only then require the
+   API log to show `Hardware ready` (Uvicorn startup alone does not open COM)
 
 ---
 
@@ -245,7 +285,9 @@ MODIFIED: simulator/static/index.html   (game_id in WebSocket URL)
 MODIFIED: frontend/src/screens/SimulatorScreen.jsx (iframe game_id)
 ```
 
-**Reverted (do not re-apply without testing):** `_scale_level_to_hardware` column remapping — caused 4th/5th hoop bugs and simulator issues.
+**Historical note:** the old ad-hoc `_scale_level_to_hardware` remapping was
+reverted because it differed from source behavior and caused fourth/fifth-hoop
+and simulator issues. The current source-parity implementation supersedes it.
 
 ---
 
