@@ -10,32 +10,40 @@ const CAT_LABEL = {
 
 const DIFFICULTIES = ['easy', 'normal', 'hard']
 
-export default function GameSettingsScreen({ game, onConfirm, onBack }) {
+export default function GameSettingsScreen({ game, playerCount, onConfirm, onBack }) {
+  const players = playerCount ?? 1
   const [categories, setCategories] = useState({})
-  const [playerCount, setPlayerCount] = useState(1)
-  const [category, setCategory]       = useState('casual')
-  const [level, setLevel]             = useState('')
-  const [difficulty, setDifficulty]   = useState('normal')
-  const [loading, setLoading]         = useState(true)
+  const [category, setCategory]     = useState(players === 2 ? 'dk' : 'casual')
+  const [level, setLevel]           = useState('')
+  const [difficulty, setDifficulty] = useState('normal')
+  const [loading, setLoading]       = useState(true)
 
   useEffect(() => {
+    const defaultCat = players === 2 ? 'dk' : 'casual'
+    setLoading(true)
     fetch(`${API_URL}/levels`)
       .then(r => r.json())
       .then(d => {
         if (d.success) {
-          setCategories(d.categories || {})
-          const first = (d.categories?.casual || [])[0]
+          const cats = d.categories || {}
+          setCategories(cats)
+          setCategory(defaultCat)
+          const pool = cats[defaultCat] || []
+          const first = players === 2
+            ? pool.find(l => l.multiplayer)
+            : pool.find(l => !l.multiplayer)
           if (first) setLevel(first.id)
+          else if (pool[0]) setLevel(pool[0].id)
         }
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }, [players])
 
-  const filteredLevels = (cat = category, players = playerCount) => {
-    const lvls = categories[cat] || []
-    if (players === 2) return lvls.filter(l => l.multiplayer)
-    return lvls.filter(l => !l.multiplayer)
+  const filteredLevels = (cat = category) => {
+    const all = categories[cat] || []
+    if (players === 2) return all.filter(l => l.multiplayer)
+    return all.filter(l => !l.multiplayer)
   }
 
   const handleCategory = (cat) => {
@@ -44,95 +52,91 @@ export default function GameSettingsScreen({ game, onConfirm, onBack }) {
     if (lvls.length) setLevel(lvls[0].id)
   }
 
-  const handlePlayerCount = (n) => {
-    setPlayerCount(n)
-    const defaultCat = n === 2 ? 'dk' : 'casual'
-    setCategory(defaultCat)
-    const lvls = filteredLevels(defaultCat, n)
-    if (lvls.length) setLevel(lvls[0].id)
-  }
-
-  const levelList = filteredLevels()
   const availableCats = Object.keys(CAT_LABEL).filter(cat => {
-    if (playerCount === 2 && cat !== 'dk') return false
-    if (playerCount === 1 && cat === 'dk') return false
+    if (players === 2 && cat !== 'dk') return false
+    if (players === 1 && cat === 'dk') return false
     return filteredLevels(cat).length > 0
   })
 
+  const levelList = filteredLevels()
+  const selectedLevel = levelList.find(l => l.id === level) || levelList[0]
+
   const handleConfirm = () => {
-    if (!level) return
-    onConfirm({ game, level, difficulty, playerCount })
+    if (!selectedLevel) return
+    onConfirm({
+      game: game || 'hoops',
+      level: selectedLevel.id,
+      levelData: selectedLevel,
+      playerCount: players,
+      difficulty,
+    })
   }
 
-  if (loading) {
-    return (
-      <div className="screen">
-        <div className="card">
-          <p style={{ textAlign: 'center', color: '#888' }}>Loading levels…</p>
-        </div>
+  if (loading) return (
+    <div className="screen">
+      <div className="card settings-card">
+        <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading levels…</p>
       </div>
-    )
-  }
+    </div>
+  )
 
   return (
     <div className="screen">
-      <div className="card">
-        <h1>🏀 Hoops</h1>
-        <p style={{ textAlign: 'center', color: '#888', marginTop: '-10px' }}>
-          Game Settings
+      <div className="card settings-card">
+        <h1>LED Hoops</h1>
+        <p className="settings-subtitle">
+          Game Settings · {players === 2 ? '2 Players' : '1 Player'}
         </p>
 
-        <h2 style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '24px' }}>PLAYERS</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          {[1, 2].map(n => (
-            <button
-              key={n}
-              type="button"
-              className={`option-btn ${playerCount === n ? 'selected' : ''}`}
-              style={{ flex: 1 }}
-              onClick={() => handlePlayerCount(n)}
-            >
-              {n === 1 ? '1 Player' : '2 Players'}
-            </button>
-          ))}
-        </div>
-
-        <h2 style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '20px' }}>SERIES</h2>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {/* Category rail */}
+        <h2 className="settings-section-label">CATEGORY</h2>
+        <div className="cat-rail" role="listbox" aria-label="Categories">
           {availableCats.map(cat => (
             <button
               key={cat}
               type="button"
-              className={`option-btn ${category === cat ? 'selected' : ''}`}
-              style={{ flex: '1 1 30%', padding: '10px 8px' }}
+              role="option"
+              aria-selected={category === cat}
+              className={`cat-chip ${category === cat ? 'selected' : ''}`}
               onClick={() => handleCategory(cat)}
-              title={CAT_LABEL[cat]?.desc}
             >
-              <div style={{ fontWeight: 'bold' }}>{CAT_LABEL[cat]?.label || cat}</div>
-              <div style={{ fontSize: '0.7rem', color: '#888', marginTop: '3px' }}>
-                {CAT_LABEL[cat]?.desc}
-              </div>
+              <span className="cat-chip-label">{CAT_LABEL[cat]?.label || cat}</span>
+              <span className="cat-chip-desc">{CAT_LABEL[cat]?.desc}</span>
             </button>
           ))}
         </div>
 
-        <h2 style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '20px' }}>
-          LEVEL <span style={{ color: '#555' }}>({levelList.length})</span>
+        {/* Level rail */}
+        <h2 className="settings-section-label">
+          LEVEL <span className="settings-count">({levelList.length} available)</span>
         </h2>
-        <select value={level} onChange={e => setLevel(e.target.value)}>
-          {levelList.map(l => (
-            <option key={l.id} value={l.id}>{l.name}</option>
+        <div className="level-rail" role="listbox" aria-label="Levels">
+          {levelList.map(lv => (
+            <button
+              key={lv.id}
+              type="button"
+              role="option"
+              aria-selected={level === lv.id}
+              className={`level-chip ${level === lv.id ? 'selected' : ''}`}
+              onClick={() => setLevel(lv.id)}
+            >
+              {lv.name}
+            </button>
           ))}
-        </select>
+          {levelList.length === 0 && (
+            <p className="rail-empty">No levels for this mode</p>
+          )}
+        </div>
 
-        <h2 style={{ fontSize: '0.9rem', color: '#aaa', marginTop: '20px' }}>DIFFICULTY</h2>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        {/* Difficulty */}
+        <h2 className="settings-section-label">DIFFICULTY</h2>
+        <div className="diff-row">
           {DIFFICULTIES.map(d => (
             <button
               key={d}
               type="button"
               className={`option-btn ${difficulty === d ? 'selected' : ''}`}
-              style={{ flex: 1 }}
+              style={{ flex: 1, margin: 0 }}
               onClick={() => setDifficulty(d)}
             >
               {d.charAt(0).toUpperCase() + d.slice(1)}
@@ -140,10 +144,11 @@ export default function GameSettingsScreen({ game, onConfirm, onBack }) {
           ))}
         </div>
 
-        <button type="button" onClick={handleConfirm} disabled={!level}>
+        <button onClick={handleConfirm} style={{ marginTop: '24px' }}
+                disabled={!selectedLevel}>
           Next → Login
         </button>
-        <button type="button" onClick={onBack} style={{ background: '#333', marginTop: '10px' }}>
+        <button onClick={onBack} className="btn-secondary" style={{ marginTop: '10px' }}>
           Back
         </button>
       </div>
