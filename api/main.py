@@ -100,12 +100,24 @@ async def start_game(request: StartGameRequest) -> StartGameResponse:
                 error="Session time expired (60-minute limit)"
             )
 
+        mode = (request.mode or "").strip().lower() or None
+        if mode and mode != "group":
+            return StartGameResponse(success=False, error=f"Unknown mode: {mode}")
+
+        level = request.level
+        if mode == "group" and (level is None or str(level).strip() == ""):
+            level = "auto"
+
+        # Group mode is always 1P (.led under source_group/)
+        player_count = 1 if mode == "group" else request.player_count
+
         # Create game instance
         game_id = game_manager.create_game(
             request.card_id,
-            request.level,
+            level if level is not None else "auto",
             request.difficulty,
-            player_count=request.player_count,
+            player_count=player_count,
+            mode=mode,
         )
 
         # Start game loop in background

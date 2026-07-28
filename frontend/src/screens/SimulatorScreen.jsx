@@ -4,6 +4,7 @@ import { API_URL, WS_BRIDGE_URL } from '../config'
 
 /** 2P when settings, login, or DK level say so (cardId2 is the strongest signal). */
 function effectivePlayerCount(config) {
+  if (config.playMode === 'group') return 1
   if (config.cardId2) return 2
   if ((config.playerCount || 1) >= 2) return 2
   if (String(config.level || '').toUpperCase().startsWith('DK')) return 2
@@ -72,9 +73,10 @@ export default function SimulatorScreen({ config, onGameEnd }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             card_id: config.cardId,
-            level: config.level || '001',
+            level: config.playMode === 'group' ? (config.level || 'auto') : (config.level || '001'),
             difficulty: config.difficulty || 'normal',
-            player_count: effectivePlayerCount(config),
+            player_count: config.playMode === 'group' ? 1 : effectivePlayerCount(config),
+            ...(config.playMode === 'group' ? { mode: 'group' } : {}),
           })
         })
         const data = await response.json()

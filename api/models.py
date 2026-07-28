@@ -23,9 +23,10 @@ class LoginResponse(BaseModel):
 # ============= GAME START =============
 class StartGameRequest(BaseModel):
     card_id: str
-    level: Union[int, str]  # numeric (17-26) or named (DK01)
-    difficulty: str  # "easy", "normal", "hard"
+    level: Optional[Union[int, str]] = None  # omitted/auto for group mode
+    difficulty: str = "normal"  # "easy", "normal", "hard"
     player_count: int = 1  # 1 = EditorGame (all colors → one score), 2 = EditorGame2 (.ledb only)
+    mode: Optional[str] = None  # "group" → marathon from games/source_group/
 
 class StartGameResponse(BaseModel):
     success: bool
