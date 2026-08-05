@@ -1536,19 +1536,13 @@ class GameManager:
                     if 'led.led_control' not in sys.modules:
                         sys.modules['led.led_control'] = MagicMock()
                 else:
+                    # HW init may fail without COM (local dev); continue with
+                    # HeadlessLedTable + sim — same as Climb/Grid/Hex.
                     if _hw_init() is None:
-                        logger.error(
+                        logger.warning(
                             f"Hardware init failed for {game_id}; "
-                            "aborting before Play/level load"
+                            "continuing with simulator-only play (no floor draws)"
                         )
-                        _mark_session_error(game, "hardware_error")
-                        game.running = False
-                        game.update_state(
-                            game_over=True,
-                            game_over_reason="hardware_error",
-                            result=0,
-                        )
-                        return
 
                 logger.info(f"Starting game loop: {game_id}")
 
