@@ -70,7 +70,7 @@ Same LED treatment as **level clear** (e.g. all green for Hoops).
 
 | Event | LED behavior |
 |-------|--------------|
-| Penalty / perfect hoop press | Red hoop **blinks 1–2×** on press |
+| Red (penalty) hoop press only | That red hoop **blinks 1–2×** on press — good/scoring hoops do not blink |
 
 ---
 
