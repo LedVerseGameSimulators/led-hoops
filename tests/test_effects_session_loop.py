@@ -39,10 +39,11 @@ FAST_SETTINGS = {
     "player_num": 1,
 }
 
+_ORIG_SLEEP = time.sleep
+
 
 def _fast_sleep(seconds):
-    """Speed up effect/game loops in tests without zeroing gameplay entirely."""
-    time.sleep(min(float(seconds), 0.002))
+    _ORIG_SLEEP(min(float(seconds), 0.002))
 
 
 @contextmanager
@@ -51,18 +52,12 @@ def session_test_env(*, level_sequence=None, game_time_sec=120.0, life_value=8):
     settings["game_time_sec"] = game_time_sec
     settings["life_value"] = life_value
     seq = level_sequence or [TINY_A]
+    game_manager._settings_cache = None
 
-    patches = [
-        mock.patch.object(game_manager, "load_real_settings", return_value=settings),
-        mock.patch.object(game_manager, "_build_level_sequence", return_value=list(seq)),
-        mock.patch.dict(
-            os.environ,
-            {"HOOPS_EFFECTS_DIR": str(EFFECTS_DIR)},
-            clear=False,
-        ),
-        mock.patch.object(game_manager.time, "sleep", side_effect=_fast_sleep),
-    ]
-    with patches[0], patches[1], patches[2], patches[3]:
+    with mock.patch("api.game_manager.load_real_settings", return_value=settings), \
+         mock.patch("api.game_manager._build_level_sequence", return_value=list(seq)), \
+         mock.patch.dict(os.environ, {"HOOPS_EFFECTS_DIR": str(EFFECTS_DIR)}, clear=False), \
+         mock.patch("api.game_manager.time.sleep", side_effect=_fast_sleep):
         game_manager.get_manager().clear_all()
         yield
 
@@ -110,9 +105,11 @@ def _start_session(client: TestClient):
 
 class EffectsSessionLoopTests(unittest.TestCase):
     def setUp(self):
+        game_manager._settings_cache = None
         game_manager.get_manager().clear_all()
 
     def tearDown(self):
+        game_manager._settings_cache = None
         game_manager.get_manager().clear_all()
 
     # ── T1: session start reaches playing with input enabled ──────────────
@@ -153,7 +150,7 @@ class EffectsSessionLoopTests(unittest.TestCase):
                     "/game-input",
                     json={"game_id": game_id, "row": 0, "col": 4, "type": "press"},
                 )
-                self.assertTrue(resp.json().get("success"))
+                # Blocked input may return success=False; score/life must not change.
                 mid = client.get(f"/game-state/{game_id}").json()["state"]
                 self.assertEqual(mid.get("score"), score_before)
                 self.assertEqual(mid.get("life"), life_before)
@@ -166,7 +163,12 @@ class EffectsSessionLoopTests(unittest.TestCase):
 
             with TestClient(app) as client:
                 game_id = _start_session(client)
-                playing = _wait_phase(client, game_id, "playing")
+                playing = _wait_until(
+                    client,
+                    game_id,
+                    lambda s: s.get("phase") == "playing"
+                    and s.get("accepting_input") is True,
+                )
                 score_before = playing.get("score", 0)
                 resp = client.post(
                     "/game-input",

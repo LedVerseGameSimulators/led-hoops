@@ -105,7 +105,7 @@ def build_level_fail_led(path: Path | None = None, *, duration: float = 0.08) ->
 def build_tiny_gameplay_led(
     path: Path | None = None,
     *,
-    board_time: float = 0.25,
+    board_time: float = 30.0,
     include_red: bool = True,
     include_goal: bool = True,
 ) -> Path:
