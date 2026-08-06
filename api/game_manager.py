@@ -841,7 +841,12 @@ def _run_level_attempt(
                 f"life={getattr(game, 'life', 0)}"
             )
             _set_input_acceptance(game, True, input_lock_held=True)
-            game.update_state(phase="playing", accepting_input=True, countdown_step=None)
+            if hasattr(game, "update_state"):
+                game.update_state(
+                    phase="playing",
+                    accepting_input=True,
+                    countdown_step=None,
+                )
         except Exception as exc:
             logger.error(
                 f"Level error for {level_path}: {stage} failed: {exc}; "
