@@ -18,9 +18,10 @@ Global rules: [activerse_final_changes/docs/game-effects/GLOBAL_RULES.md](../../
 
 ---
 
-## Countdown (game start only)
+## Countdown (every level start)
 
-Runs **once** per session at game start. **Not** repeated on level change or level restart.
+Runs before **every level** — first level of the session, after level clear,
+and after level fail restart. **Not** repeated when the session has ended.
 
 All countdown hoops use **green** LEDs. Tick/noise audio; no BGM.
 
@@ -39,7 +40,8 @@ UI countdown and hoop LEDs stay in sync.
 
 1. All hoops **green**
 2. ~2–3 s transition with stinger SFX (not BGM)
-3. **Next level** starts directly — **no countdown**
+3. **Countdown** (3-2-1-GO)
+4. **Next level** play begins
 
 ---
 
@@ -49,7 +51,8 @@ Triggered when **all lives are lost**.
 
 1. All hoops **red**
 2. ~2–3 s transition with stinger SFX (not BGM)
-3. **Same level restart** directly — **no countdown**
+3. **Countdown** (3-2-1-GO)
+4. **Same level** restart play begins
 
 ---
 
@@ -57,7 +60,9 @@ Triggered when **all lives are lost**.
 
 Same LED treatment as **level clear**.
 
-If the timer expires on the **final level** and the session ends → all LEDs **black / off** after the clear transition.
+If more levels remain: clear transition → **countdown** → next level.
+
+If the timer expires on the **final level** and the session ends → all LEDs **black / off** after the clear transition (**no** countdown).
 
 ---
 
