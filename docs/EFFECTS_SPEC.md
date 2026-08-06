@@ -56,13 +56,13 @@ Triggered when **all lives are lost**.
 
 ---
 
-## Timer expire
+## Timer expire (= session end)
 
-Same LED treatment as **level clear**.
+Same LED treatment as **level clear** (e.g. all green for Hoops).
 
-If more levels remain: clear transition → **countdown** → next level.
-
-If the timer expires on the **final level** and the session ends → all LEDs **black / off** after the clear transition (**no** countdown).
+1. Hold clear pattern ~2–3 s with transition stinger (not BGM)
+2. All LEDs **black / off**
+3. **No countdown** — session is over
 
 ---
 
