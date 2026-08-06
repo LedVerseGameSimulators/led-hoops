@@ -14,7 +14,7 @@ EFFECTS_DIR = FIXTURES_DIR / "effects"
 LEVELS_DIR = FIXTURES_DIR / "levels"
 
 GREEN = (0, 255, 0)
-RED = (255, 0, 0)
+RED = (254, 0, 0)
 BLUE = (0, 0, 254)
 
 
@@ -84,7 +84,7 @@ def build_countdown_led(path: Path | None = None, *, step: float = 0.05) -> Path
     return path
 
 
-def build_level_clear_led(path: Path | None = None, *, duration: float = 0.08) -> Path:
+def build_level_clear_led(path: Path | None = None, *, duration: float = 0.15) -> Path:
     path = path or EFFECTS_DIR / "level_clear.led"
     groups = {
         "all_green": _floor_group([(0, c) for c in range(6)], GREEN, 0.0, duration),
@@ -93,7 +93,7 @@ def build_level_clear_led(path: Path | None = None, *, duration: float = 0.08) -
     return path
 
 
-def build_level_fail_led(path: Path | None = None, *, duration: float = 0.08) -> Path:
+def build_level_fail_led(path: Path | None = None, *, duration: float = 0.15) -> Path:
     path = path or EFFECTS_DIR / "level_fail.led"
     groups = {
         "all_red": _floor_group([(0, c) for c in range(6)], RED, 0.0, duration),
@@ -109,7 +109,6 @@ def build_tiny_gameplay_led(
     include_red: bool = True,
     include_goal: bool = True,
 ) -> Path:
-    """Minimal 1×6 gameplay board for API session-loop tests."""
     path = path or LEVELS_DIR / "tiny.led"
     groups = {}
     if include_goal:
@@ -127,12 +126,14 @@ def ensure_all_fixtures() -> dict[str, Path]:
     build_level_fail_led()
     build_tiny_gameplay_led()
     build_tiny_gameplay_led(LEVELS_DIR / "tiny_b.led")
+    build_tiny_gameplay_led(LEVELS_DIR / "tiny_fast.led", board_time=0.35)
     return {
         "countdown": EFFECTS_DIR / "countdown.led",
         "level_clear": EFFECTS_DIR / "level_clear.led",
         "level_fail": EFFECTS_DIR / "level_fail.led",
         "tiny": LEVELS_DIR / "tiny.led",
         "tiny_b": LEVELS_DIR / "tiny_b.led",
+        "tiny_fast": LEVELS_DIR / "tiny_fast.led",
     }
 
 
