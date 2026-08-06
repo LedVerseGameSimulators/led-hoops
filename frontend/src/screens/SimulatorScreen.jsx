@@ -187,9 +187,14 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         const data = await response.json()
         if (data.success) {
           const st = data.state
-          // Sound cues on score gain / life loss
-          if (st.score > prevScoreRef.current || st.score2 > prevScore2Ref.current) playScore()
-          if (prevLifeRef.current !== null && st.life < prevLifeRef.current) playHurt()
+          const backendAudio = st.backend_audio !== false
+          const phase = st.phase || 'playing'
+          const inputLive = phase === 'playing' && st.accepting_input !== false
+          // Backend AudioManager is authoritative — mute FE synth when it is active.
+          if (!backendAudio && inputLive) {
+            if (st.score > prevScoreRef.current || st.score2 > prevScore2Ref.current) playScore()
+            if (prevLifeRef.current !== null && st.life < prevLifeRef.current) playHurt()
+          }
           prevScoreRef.current = st.score
           prevScore2Ref.current = st.score2 || 0
           prevLifeRef.current = st.life
@@ -242,6 +247,20 @@ export default function SimulatorScreen({ config, onGameEnd }) {
   const p1Name = config.playerName || 'Player 1'
   const p2Name = config.playerName2 || 'Player 2'
   const currentLevel = gameState?.current_level ?? config.level
+  const phase = gameState?.phase || 'playing'
+  const countdownStep = gameState?.countdown_step
+  const showCountdownOverlay = phase === 'countdown'
+  const phaseLabel = {
+    playing: '● PLAYING',
+    countdown: '● COUNTDOWN',
+    level_clear: '● LEVEL CLEAR',
+    level_fail: '● LEVEL FAIL',
+    session_end: '● SESSION END',
+  }[phase] || (isOver ? '● ENDED' : '● PLAYING')
+
+  const overlayCountdownText = showCountdownOverlay
+    ? (countdownStep === 'go' ? 'GO!' : countdownStep ?? '…')
+    : null
 
   return (
     <div className="simulator-container">
@@ -285,12 +304,19 @@ export default function SimulatorScreen({ config, onGameEnd }) {
 
         {!showSim && (
           <div className="play-hud">
+            {showCountdownOverlay && (
+              <div className="phase-countdown-overlay" aria-live="polite">
+                <div className={`countdown-num${countdownStep === 'go' ? ' go' : ''}`}>
+                  {overlayCountdownText}
+                </div>
+              </div>
+            )}
             <div className="hud-board">
               <div className="hud-meta">
                 <span className="hud-level">Level {currentLevel}</span>
                 <span className="hud-diff">{config.difficulty?.toUpperCase()}</span>
-                <span className={`hud-status ${isOver ? 'ended' : 'playing'}`}>
-                  {isOver ? '● ENDED' : '● PLAYING'}
+                <span className={`hud-status ${isOver ? 'ended' : phase === 'playing' ? 'playing' : 'transition'}`}>
+                  {isOver ? '● ENDED' : phaseLabel}
                 </span>
               </div>
 

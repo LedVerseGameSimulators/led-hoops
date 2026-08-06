@@ -1013,6 +1013,21 @@ button.btn-muted:hover:not(:disabled) {
   margin-top: 10px;
 }
 
+.phase-countdown-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.hud-status.transition {
+  color: var(--color-warning, #f5a623);
+}
+
 .result-reason {
   text-align: center;
   color: var(--text-secondary);

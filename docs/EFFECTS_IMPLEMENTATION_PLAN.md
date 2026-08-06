@@ -714,3 +714,29 @@ USE_SERIAL_HD=1 python -m pytest tests/test_hardware_boot.py -q
 ---
 
 *Plan only — no runtime code changes in this commit.*
+
+---
+
+## Implementation status (2026-08-07)
+
+- [x] `tests/test_effects_session_loop.py` — T1–T8 + T10 green (sim mode)
+- [x] `tests/test_audio_manager.py` — T9 non-blocking smoke
+- [x] `api/audio_manager.py`, marathon effect runner, `phase` / `accepting_input`
+- [x] Production `.led` under `games/source/effects/` (`scripts/build_effect_led.py`)
+- [x] Audio placeholders under `games/audio/` (see `games/audio/README.md`)
+- [x] Frontend: `SimulatorScreen` phase overlay + synth mute when `backend_audio`
+
+### Layer B smoke (manual)
+
+```bash
+cd led-hoops
+./scripts/start-dev.sh
+# Guest login → pick level → watch sim iframe:
+#   countdown greens → gameplay → fail/clear panels between levels
+# Confirm UI countdown overlay tracks backend countdown_step on levels 2+
+
+# Optional phase check via API while session runs:
+curl -s localhost:8000/game-state | python3 -m json.tool | rg phase
+```
+
+**Smoke note:** Layer A pytest green on 2026-08-07; Layer B not run in this agent session (requires interactive sim).
