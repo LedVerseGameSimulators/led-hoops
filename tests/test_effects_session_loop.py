@@ -344,6 +344,78 @@ class EffectsSessionLoopTests(unittest.TestCase):
                 self.assertIn("session_end", phases)
 
 
+class CountdownSyncTests(unittest.TestCase):
+    """CS1–CS2 — backend-owned countdown sync field (COUNTDOWN_SYNC_PLAN §5.1)."""
+
+    def setUp(self):
+        game_manager._settings_cache = None
+        game_manager.get_manager().clear_all()
+
+    def tearDown(self):
+        game_manager._settings_cache = None
+        game_manager.get_manager().clear_all()
+
+    def test_cs1_single_countdown_sequence_on_start(self):
+        """One contiguous countdown before playing; steps monotonic 3→2→1→go."""
+        with session_test_env():
+            from api.main import app
+
+            with TestClient(app) as client:
+                game_id = _start_session(client)
+                countdown_steps = []
+                phases = []
+                countdown_runs = 0
+                in_countdown = False
+                for state in _poll_state(client, game_id, timeout=10):
+                    phase = state.get("phase")
+                    if phase and (not phases or phases[-1] != phase):
+                        phases.append(phase)
+                    if phase == "countdown":
+                        if not in_countdown:
+                            countdown_runs += 1
+                            in_countdown = True
+                        step = state.get("countdown_step")
+                        if step is not None and (
+                            not countdown_steps or countdown_steps[-1] != step
+                        ):
+                            countdown_steps.append(step)
+                    else:
+                        in_countdown = False
+                    if phase == "playing" and state.get("accepting_input"):
+                        break
+
+                self.assertEqual(countdown_runs, 1, f"phases={phases} steps={countdown_steps}")
+                self.assertIn("countdown", phases)
+                order = {3: 0, 2: 1, 1: 2, "go": 3}
+                seen = [s for s in countdown_steps if s in order]
+                self.assertTrue(seen, f"expected countdown steps, got {countdown_steps}")
+                for i in range(len(seen) - 1):
+                    self.assertLess(
+                        order[seen[i]],
+                        order[seen[i + 1]],
+                        f"steps not monotonic: {countdown_steps}",
+                    )
+
+    def test_cs2_countdown_step_populated_during_countdown(self):
+        """countdown_step is non-null on every poll while phase=countdown."""
+        with session_test_env():
+            from api.main import app
+
+            with TestClient(app) as client:
+                game_id = _start_session(client)
+                saw_countdown = False
+                for state in _poll_state(client, game_id, timeout=10):
+                    if state.get("phase") == "countdown":
+                        saw_countdown = True
+                        self.assertIsNotNone(
+                            state.get("countdown_step"),
+                            "countdown_step must be set during countdown",
+                        )
+                    elif state.get("phase") == "playing" and state.get("accepting_input"):
+                        break
+                self.assertTrue(saw_countdown, "never entered countdown phase")
+
+
 class HoopsRedBlinkTests(unittest.TestCase):
     """T10 — penalty-only red blink (not scoring hoops)."""
 

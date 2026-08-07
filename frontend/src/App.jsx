@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import LoginScreen         from './screens/LoginScreen'
 import GameSelectionScreen from './screens/GameSelectionScreen'
 import GameSettingsScreen  from './screens/GameSettingsScreen'
-import CountdownScreen     from './screens/CountdownScreen'
 import SimulatorScreen     from './screens/SimulatorScreen'
 import ResultScreen        from './screens/ResultScreen'
 
@@ -122,7 +121,7 @@ export default function App() {
       minutesRemaining,
       minutesRemaining2,
     }))
-    setScreen(S.COUNTDOWN)
+    setScreen(S.SIMULATOR)
   }
 
   const handleGameEnd = (finalResult) => {
@@ -171,12 +170,6 @@ export default function App() {
           onBack={() => setScreen(
             gameConfig.playMode === 'group' ? S.GAME_SELECT : S.SETTINGS
           )}
-        />
-      )}
-      {screen === S.COUNTDOWN && (
-        <CountdownScreen
-          config={gameConfig}
-          onDone={() => setScreen(S.SIMULATOR)}
         />
       )}
       {screen === S.SIMULATOR && (

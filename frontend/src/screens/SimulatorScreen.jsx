@@ -2,6 +2,23 @@ import { useEffect, useState, useRef } from 'react'
 
 import { API_URL, WS_BRIDGE_URL } from '../config'
 
+function countdownDisplay(state) {
+  if (state?.phase !== 'countdown') return null
+  const s = state.countdown_step
+  if (s === 'go' || s === 0) return 'GO!'
+  return String(s ?? '')
+}
+
+function isInputBlocked(state) {
+  if (!state) return true
+  if (state.accepting_input === false) return true
+  return state.phase && state.phase !== 'playing'
+}
+
+function showPhaseOverlay(state) {
+  return ['countdown', 'level_clear', 'level_fail'].includes(state?.phase)
+}
+
 /** 2P when settings, login, or DK level say so (cardId2 is the strongest signal). */
 function effectivePlayerCount(config) {
   if (config.playMode === 'group') return 1
@@ -187,8 +204,8 @@ export default function SimulatorScreen({ config, onGameEnd }) {
         const data = await response.json()
         if (data.success) {
           const st = data.state
-          const backendAudio = st.backend_audio !== false
-          const phase = st.phase || 'playing'
+          const backendAudio = st.backend_audio === true
+          const phase = st.phase || 'idle'
           const inputLive = phase === 'playing' && st.accepting_input !== false
           // Backend AudioManager is authoritative — mute FE synth when it is active.
           if (!backendAudio && inputLive) {
@@ -247,20 +264,17 @@ export default function SimulatorScreen({ config, onGameEnd }) {
   const p1Name = config.playerName || 'Player 1'
   const p2Name = config.playerName2 || 'Player 2'
   const currentLevel = gameState?.current_level ?? config.level
-  const phase = gameState?.phase || 'playing'
-  const countdownStep = gameState?.countdown_step
-  const showCountdownOverlay = phase === 'countdown'
+  const phase = gameState?.phase || (isOver ? 'session_end' : 'idle')
+  const inputLocked = isInputBlocked(gameState)
+  const overlayCountdownText = countdownDisplay(gameState)
   const phaseLabel = {
+    idle: '● STARTING',
     playing: '● PLAYING',
     countdown: '● COUNTDOWN',
     level_clear: '● LEVEL CLEAR',
     level_fail: '● LEVEL FAIL',
     session_end: '● SESSION END',
-  }[phase] || (isOver ? '● ENDED' : '● PLAYING')
-
-  const overlayCountdownText = showCountdownOverlay
-    ? (countdownStep === 'go' ? 'GO!' : countdownStep ?? '…')
-    : null
+  }[phase] || (isOver ? '● ENDED' : '● STARTING')
 
   return (
     <div className="simulator-container">
@@ -302,15 +316,23 @@ export default function SimulatorScreen({ config, onGameEnd }) {
           title="Game Simulator"
         />
 
+        {showPhaseOverlay(gameState) && phase === 'countdown' && !isOver && overlayCountdownText && (
+          <div className="phase-countdown-overlay" aria-live="polite">
+            <div className={`countdown-num${overlayCountdownText === 'GO!' ? ' go' : ''}`}>
+              {overlayCountdownText}
+            </div>
+            <div className="countdown-meta">Level {currentLevel}</div>
+          </div>
+        )}
+
+        {(phase === 'level_clear' || phase === 'level_fail') && !isOver && (
+          <div className={`phase-overlay ${phase}-overlay`} aria-live="polite">
+            {phase === 'level_clear' ? 'Level clear!' : 'Try again!'}
+          </div>
+        )}
+
         {!showSim && (
           <div className="play-hud">
-            {showCountdownOverlay && (
-              <div className="phase-countdown-overlay" aria-live="polite">
-                <div className={`countdown-num${countdownStep === 'go' ? ' go' : ''}`}>
-                  {overlayCountdownText}
-                </div>
-              </div>
-            )}
             <div className="hud-board">
               <div className="hud-meta">
                 <span className="hud-level">Level {currentLevel}</span>
@@ -392,6 +414,12 @@ export default function SimulatorScreen({ config, onGameEnd }) {
                 : ''}
             </span>
           )}
+        </div>
+      )}
+
+      {showSim && inputLocked && !isOver && (
+        <div className="sim-input-lock" aria-hidden="true">
+          Input paused ({phase})
         </div>
       )}
 

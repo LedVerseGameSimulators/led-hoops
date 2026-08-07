@@ -548,6 +548,11 @@ def _countdown_step_from_pass(dict_group, total_pass):
     return "go"
 
 
+def _backend_audio_active(audio_mgr) -> bool:
+    """True only when backend AudioManager is enabled (not sim-disabled)."""
+    return bool(audio_mgr and getattr(audio_mgr, "_enabled", False))
+
+
 def _build_effect_led_display(dict_group, total_pass, led_table):
     try:
         from model.setting import Setting
@@ -581,12 +586,13 @@ def _play_led_panel(
 ):
     """Run one transition .led panel on the marathon thread."""
     game.begin_level_transition()
-    game._last_countdown_step = None
+    initial_step = 3 if countdown_ticks else None
+    game._last_countdown_step = initial_step
     game.update_state(
         phase=phase,
         accepting_input=False,
-        countdown_step=None,
-        backend_audio=True,
+        countdown_step=initial_step,
+        backend_audio=_backend_audio_active(audio_mgr),
     )
     if play is None:
         game.finish_level_transition()
@@ -620,11 +626,14 @@ def _play_led_panel(
         led_display = _build_effect_led_display(dgroup, total_pass, led_table)
         countdown_step = None
         if countdown_ticks:
-            countdown_step = _countdown_step_from_pass(dgroup, total_pass)
-            if countdown_step != game._last_countdown_step:
-                game._last_countdown_step = countdown_step
-                if audio_mgr and countdown_step in (3, 2, 1):
-                    audio_mgr.play_sfx(audio_mgr.tick_sfx)
+            if game._last_countdown_step == "go":
+                countdown_step = "go"
+            else:
+                countdown_step = _countdown_step_from_pass(dgroup, total_pass)
+                if countdown_step != game._last_countdown_step:
+                    game._last_countdown_step = countdown_step
+                    if audio_mgr and countdown_step in (3, 2, 1):
+                        audio_mgr.play_sfx(audio_mgr.tick_sfx)
         game.update_state(
             phase=phase,
             led_display=led_display,
@@ -632,7 +641,7 @@ def _play_led_panel(
             time_left=max(0, game.game_time_sec - session_elapsed),
             accepting_input=False,
             countdown_step=countdown_step,
-            backend_audio=True,
+            backend_audio=_backend_audio_active(audio_mgr),
         )
         draw_now = time.time()
         if USE_SERIAL_HD and _hw_led_control is not None and draw_now - getattr(
@@ -1464,7 +1473,7 @@ class GameInstance:
             "phase": "idle",
             "countdown_step": None,
             "accepting_input": False,
-            "backend_audio": True,
+            "backend_audio": False,
         }
         self.thread = None
 
@@ -2156,7 +2165,9 @@ class GameManager:
                             levels_cleared=game.levels_cleared,
                             phase="playing",
                             accepting_input=True,
-                            backend_audio=True,
+                            backend_audio=_backend_audio_active(
+                                getattr(game, "_audio_mgr", None)
+                            ),
                         )
 
                         frame_counter["n"] += 1
