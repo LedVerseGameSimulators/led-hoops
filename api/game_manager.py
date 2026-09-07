@@ -1171,20 +1171,14 @@ def _build_hoops_led_display(cell_win, led_table, total_pass, flashes, *, now=No
     """Build the simulator's flat, row-major physical LED buffer."""
     cols = led_table.led_col
     rows = led_table.led_row
-    breath = 0.55 + 0.45 * (
-        0.5 + 0.5 * math.sin(total_pass * math.pi)
-    )
     led_display = [[0, 0, 0] for _ in range(rows * cols)]
     for (row, col), (_, category, main_color) in cell_win.items():
         index = row * cols + col
-        if category in ("goal", "p1", "p2"):
-            led_display[index] = [int(channel * breath) for channel in main_color]
-        else:
-            led_display[index] = [
-                int(main_color[0]),
-                int(main_color[1]),
-                int(main_color[2]),
-            ]
+        led_display[index] = [
+            int(main_color[0]),
+            int(main_color[1]),
+            int(main_color[2]),
+        ]
 
     if now is None:
         now = time.time()
