@@ -12,29 +12,52 @@ echo ========================================
 echo.
 
 where python >nul 2>&1
-if errorlevel 1 goto no_python
-
-where node >nul 2>&1
-if errorlevel 1 goto no_node
-
-if not exist "games\setting\led_parameter.dat" goto no_settings
-
-if not exist "frontend\node_modules" goto need_npm
-goto after_npm
-
-:need_npm
-echo First run: installing frontend packages (may take a few minutes)...
-pushd frontend
-call npm install
 if errorlevel 1 (
-  echo ERROR: npm install failed.
-  popd
-  pause
-  exit /b 1
+    if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" (
+        set "PATH=%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts;%PATH%"
+    ) else (
+        echo ERROR: Python not found. Ask tech to run SETUP_FIRST_TIME.bat
+        goto :fail
+    )
 )
-popd
 
-:after_npm
+where npm >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Node.js not found. Ask tech to run SETUP_FIRST_TIME.bat
+    goto :fail
+)
+
+if not exist "games\setting\led_parameter.dat" (
+    echo ERROR: Floor settings missing: games\setting\led_parameter.dat
+    goto :fail
+)
+
+echo Checking Python packages...
+python -c "import fastapi, uvicorn, httpx, serial" >nul 2>&1
+if errorlevel 1 (
+    echo Installing Python packages (first time)...
+    python -m pip install -r "api\requirements.txt"
+    if errorlevel 1 goto :fail
+)
+
+if not exist "frontend\node_modules" (
+    echo First run: installing frontend packages...
+    pushd frontend
+    call npm install
+    if errorlevel 1 (
+      popd
+      goto :fail
+    )
+    popd
+)
+
+if not exist "frontend\.env" (
+    if exist "frontend\.env.example" (
+        copy /Y "frontend\.env.example" "frontend\.env" >nul
+        echo Created frontend\.env — confirm RFID IP if needed.
+    )
+)
+
 echo Stopping any previous game windows...
 call "%ROOT%\STOP_GAME.bat" /quiet
 ping -n 3 127.0.0.1 >nul
@@ -72,47 +95,22 @@ echo UI is ready.
 :check_hw
 echo Checking hardware mode...
 powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://localhost:8000/hw-debug' -TimeoutSec 5; if ($r.use_serial_hd) { Write-Host 'HARDWARE MODE: ON' } else { Write-Host 'ERROR: HARDWARE MODE OFF - floor will stay dark'; exit 2 } } catch { Write-Host 'WARNING: could not confirm hardware mode yet'; exit 0 }"
-if errorlevel 2 goto hw_failed
+if errorlevel 2 goto :fail
 
-:open_browser
 start "" "http://localhost:5173"
 
 echo.
 echo ========================================
 echo   LED HOOPS is running (HARDWARE)
-echo ========================================
 echo   Open:  http://localhost:5173
-echo   Floor LEDs should light when you start a game.
-echo   Leave the three black windows open.
 echo   To stop: double-click STOP_GAME.bat
 echo ========================================
 echo.
 pause
 exit /b 0
 
-:hw_failed
+:fail
 echo.
-echo ERROR: API started without hardware mode.
-echo Check the "LED Hoops API" window for errors.
-echo.
-pause
-exit /b 1
-
-:no_python
-echo ERROR: Python not found.
-echo Install Python 3.11 and add it to PATH, then try again.
-pause
-exit /b 1
-
-:no_node
-echo ERROR: Node.js not found.
-echo Install Node.js LTS and try again.
-pause
-exit /b 1
-
-:no_settings
-echo ERROR: Floor settings missing.
-echo Expected file: games\setting\led_parameter.dat
-echo Ask a technician to copy settings onto this PC.
+echo START FAILED. See OPERATOR_GUIDE.md or run SETUP_FIRST_TIME.bat
 pause
 exit /b 1
