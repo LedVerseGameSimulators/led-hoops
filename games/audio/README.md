@@ -1,14 +1,13 @@
 # Hoops audio assets
 
-Canonical paths consumed by `api/audio_manager.py`:
+Canonical paths used by `api/audio_manager.py`:
 
 | File | Use |
 |------|-----|
-| `transition_stinger.mp3` | Level clear + level fail (shared, locked) |
-| `bgm_thank_you_not_so_bad.mp3` | Gameplay BGM loop |
-| `score_positive.mp3` | Goal / score SFX |
-| `score_negative.mp3` | Penalty / miss SFX |
-| `countdown_tick.mp3` | Backend countdown 3-2-1 ticks |
+| `bgm_thank_you_not_so_bad.mp3` | Gameplay BGM (from venue pack) |
+| `score_positive.mp3` | Goal / +score |
+| `score_negative.mp3` | Penalty / miss |
+| `countdown_tick.mp3` | 3-2-1 ticks (**stock** placeholder tone for now) |
+| `transition_stinger.mp3` | Level clear + fail (**stock** placeholder tone for now) |
 
-**CI / dev placeholders:** short silent clips generated via `ffmpeg` (≈0.15 s).
-Replace with production mp3s from the onsite `games/` bundle before hardware deploy.
+Replace tick/stinger with final branded assets when available.
