@@ -13,7 +13,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 EFFECTS_DIR = FIXTURES_DIR / "effects"
 LEVELS_DIR = FIXTURES_DIR / "levels"
 
-GREEN = (0, 255, 0)
+GREEN = (0, 254, 0)
 RED = (254, 0, 0)
 BLUE = (0, 0, 254)
 
