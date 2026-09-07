@@ -87,11 +87,7 @@ mocks = {
     }),
     'net': MagicMock(),
     'socket': MagicMock(),
-    # Audio/Video
-    'pygame': MagicMock(),
-    'pygame.mixer': MagicMock(),
-    'audio_play': MagicMock(),
-    'audio_play.audio': MagicMock(),
+    # Audio/Video — do NOT mock pygame/audio_play (venue BGM/SFX need real mixer)
     'moviepy': MagicMock(),
     'moviepy.editor': MagicMock(),
     'cv2': MagicMock(),
@@ -2200,7 +2196,7 @@ class GameManager:
                 try:
                     from api.audio_manager import AudioManager
 
-                    audio_mgr = AudioManager(settings=_s, enabled=False)
+                    audio_mgr = AudioManager(settings=_s, enabled=True)
                 except Exception as aud_err:
                     logger.warning(f"AudioManager unavailable: {aud_err}")
                 game._audio_mgr = audio_mgr
