@@ -35,7 +35,7 @@ if not exist "games\setting\led_parameter.dat" (
 echo Checking Python packages...
 python -c "import fastapi, uvicorn, httpx, serial" >nul 2>&1
 if errorlevel 1 (
-    echo Installing Python packages (first time)...
+    echo Installing Python packages - first time...
     python -m pip install -r "api\requirements.txt"
     if errorlevel 1 goto :fail
 )
@@ -54,7 +54,7 @@ if not exist "frontend\node_modules" (
 if not exist "frontend\.env" (
     if exist "frontend\.env.example" (
         copy /Y "frontend\.env.example" "frontend\.env" >nul
-        echo Created frontend\.env — confirm RFID IP if needed.
+        echo Created frontend\.env - confirm RFID IP if needed.
     )
 )
 

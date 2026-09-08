@@ -1,5 +1,5 @@
 @echo off
-REM One-time tech setup — NOT for daily operators.
+REM One-time tech setup - NOT for daily operators.
 REM After this succeeds once, operators only use START_GAME.bat / STOP_GAME.bat.
 setlocal EnableExtensions
 cd /d "%~dp0"
@@ -57,7 +57,7 @@ popd
 if not exist "frontend\.env" (
   if exist "frontend\.env.example" (
     copy /Y "frontend\.env.example" "frontend\.env" >nul
-    echo Created frontend\.env — confirm VITE_RFID_API_URL points at the RFID PC.
+    echo Created frontend\.env - confirm VITE_RFID_API_URL points at the RFID PC.
   )
 )
 
