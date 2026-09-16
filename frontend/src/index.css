@@ -788,6 +788,11 @@ input {
   color: var(--text-muted);
 }
 
+.phase-countdown-overlay.step-go .phase-countdown-digit {
+  color: var(--accent);
+  font-size: clamp(4rem, 16vw, 8rem);
+}
+
 .phase-transition-overlay {
   position: absolute;
   inset: 0;

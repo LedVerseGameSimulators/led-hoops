@@ -24,7 +24,7 @@ async function validateRfidCard(cardId) {
   return res.json()
 }
 
-export default function LoginScreen({ gameTitle = 'Battle Arena', onLogin, playerCount = 1, onBack }) {
+export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount = 1, onBack }) {
   const [card1, setCard1] = useState('')
   const [card2, setCard2] = useState('')
   const [p1Info, setP1Info] = useState(null)

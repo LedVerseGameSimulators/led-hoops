@@ -128,7 +128,7 @@ export default function App() {
       )}
       {screen === S.LOGIN && (
         <LoginScreen
-          gameTitle="LED Hoops"
+          gameTitle="Hoops"
           playerCount={gameConfig.playerCount}
           onLogin={handleLogin}
           onBack={() => setScreen(S.SETUP)}
