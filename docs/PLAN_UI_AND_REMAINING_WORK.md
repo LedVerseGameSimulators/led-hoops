@@ -26,6 +26,7 @@
 ## Implementation status
 
 - [x] Decisions locked (2026-09-16)
+- [x] Score/RFID logical level labels (Hex contract): `levelPlaylists.js`, guest skip save, `level_file` columns
 - [ ] **After Hex FE shell** is the template — apply same shell here
 - [ ] Wire modes + 20+20 placeholders + Tournament skip Settings
 - [ ] Login: RFID path + guest random names
