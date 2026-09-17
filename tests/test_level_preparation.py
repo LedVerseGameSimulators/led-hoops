@@ -454,8 +454,20 @@ class LifecycleOrderingTests(unittest.TestCase):
                 getattr(play, other).assert_not_called()
                 self.assertTrue(session._session_over)
                 self.assertEqual(session._end_reason, "level_error")
-                session.update_state.assert_called_once_with(
-                    game_over_reason="level_error", result=0
+                # Setup publishes HUD swatches, then play failure marks level_error.
+                self.assertEqual(
+                    session.update_state.call_args_list,
+                    [
+                        mock.call(
+                            phase="playing",
+                            accepting_input=True,
+                            countdown_step=None,
+                            multiplayer=False,
+                            goal_color=None,
+                            goal2_color=None,
+                        ),
+                        mock.call(game_over_reason="level_error", result=0),
+                    ],
                 )
 
     def test_frame_callback_exception_logs_marks_level_error_and_stops(self):

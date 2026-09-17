@@ -847,10 +847,21 @@ def _run_level_attempt(
             )
             _set_input_acceptance(game, True, input_lock_held=True)
             if hasattr(game, "update_state"):
+                # Publish HUD swatches as soon as the level is set up (not only
+                # on the first frame callback).
                 game.update_state(
                     phase="playing",
                     accepting_input=True,
                     countdown_step=None,
+                    multiplayer=bool(getattr(game, "multiplayer", False)),
+                    goal_color=(list(game.goal_color)
+                                if getattr(game, "multiplayer", False)
+                                and getattr(game, "goal_color", None)
+                                else None),
+                    goal2_color=(list(game.goal2_color)
+                                 if getattr(game, "multiplayer", False)
+                                 and getattr(game, "goal2_color", None)
+                                 else None),
                 )
         except Exception as exc:
             logger.error(
