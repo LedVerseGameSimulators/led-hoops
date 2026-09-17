@@ -37,9 +37,10 @@
 
 ## Non-FE leftovers
 
-- [ ] Shared **2P rules** later (lives-only red; either-player advance; goal-color HUD)
-- [ ] Content: max ~10 waves (`docs/PLAN_HOOPS_MAX_10_WAVES.md`); long-level / orphan-wave sweeps
+- [ ] Shared **2P rules** — **FE goal-color swatches only** this pass (no scoring/wave changes)
+- [ ] ~~Content: max ~10 waves / long-level sweeps~~ — **deprioritized**
 - [ ] Optional: delete dead FE screens
+- [ ] Full Hoops 2P scoring/wave — **deferred**
 
 ---
 
