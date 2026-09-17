@@ -389,6 +389,13 @@ export default function SimulatorScreen({ config, onGameEnd }) {
                   )}
                   <div className="hud-score">{gameState?.score ?? 0}</div>
                   <div className="hud-score-label">{isMulti ? 'P1 Score' : 'Score'}</div>
+                  {gameState?.multiplayer === true && Array.isArray(gameState?.goal_color) && (
+                    <div
+                      className="hud-goal-swatch"
+                      style={{ backgroundColor: `rgb(${gameState.goal_color.join(',')})` }}
+                      aria-label="P1 goal color"
+                    />
+                  )}
                 </div>
                 {isMulti && (
                   <div className="hud-player hud-player--p2">
@@ -400,6 +407,13 @@ export default function SimulatorScreen({ config, onGameEnd }) {
                     )}
                     <div className="hud-score">{gameState?.score2 ?? 0}</div>
                     <div className="hud-score-label">P2 Score</div>
+                    {gameState?.multiplayer === true && Array.isArray(gameState?.goal2_color) && (
+                      <div
+                        className="hud-goal-swatch"
+                        style={{ backgroundColor: `rgb(${gameState.goal2_color.join(',')})` }}
+                        aria-label="P2 goal color"
+                      />
+                    )}
                   </div>
                 )}
               </div>

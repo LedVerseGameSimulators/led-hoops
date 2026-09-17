@@ -1452,6 +1452,8 @@ class GameInstance:
             "display_max": math.ceil(self.max_life / 4),     # 5
             "score2": 0,
             "multiplayer": False,
+            "goal_color": None,
+            "goal2_color": None,
             "player_pos": [0, 0],
             "led_display": [],
             "game_over": False,
@@ -1957,6 +1959,13 @@ class GameManager:
                     game.multiplayer = _level_uses_2p_scoring(
                         lvl_path, game.session_player_count)
                     game._player_num = 2 if game.multiplayer else 1
+                    # HUD swatches: fixed P1 blue / P2 orange in Team Battle.
+                    if game.multiplayer:
+                        game.goal_color = (0, 0, 254)
+                        game.goal2_color = (254, 128, 0)
+                    else:
+                        game.goal_color = None
+                        game.goal2_color = None
                     # Original EditorGame: cover_action False → disappear mode.
                     game._cover_disappear = not bool(
                         getattr(go, "cover_action", False)) if go else True
@@ -2142,6 +2151,12 @@ class GameManager:
                             score=game.score,
                             score2=game.score2,
                             multiplayer=game.multiplayer,
+                            goal_color=(list(game.goal_color)
+                                        if game.multiplayer and game.goal_color
+                                        else None),
+                            goal2_color=(list(game.goal2_color)
+                                         if game.multiplayer and game.goal2_color
+                                         else None),
                             time_elapsed=session_elapsed,                       # SESSION elapsed
                             time_left=max(0, game.game_time_sec - session_elapsed),  # SESSION countdown
                             life=game.life,
