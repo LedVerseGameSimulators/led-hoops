@@ -3,6 +3,8 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 set "ROOT=%CD%"
 
+if not defined ACTIVERSE_KIOSK set "ACTIVERSE_KIOSK=1"
+
 title LED Hoops - Starting
 echo.
 echo ========================================
@@ -63,15 +65,17 @@ call "%ROOT%\STOP_GAME.bat" /quiet
 ping -n 3 127.0.0.1 >nul
 
 echo Starting floor engine with HARDWARE mode (API port 8000)...
-start "LED Hoops API" /D "%ROOT%" cmd /k "call scripts\run-api-hardware.bat"
+start "LED Hoops API" /MIN /D "%ROOT%" cmd /k "call scripts\run-api-hardware.bat"
 ping -n 4 127.0.0.1 >nul
 
 echo Starting bridge (port 8765)...
-start "LED Hoops ws_bridge" /D "%ROOT%" cmd /k "python ws_bridge.py"
+start "LED Hoops ws_bridge" /MIN /D "%ROOT%" cmd /k "python ws_bridge.py"
 ping -n 3 127.0.0.1 >nul
 
 echo Starting game UI (port 5173)...
-start "LED Hoops Frontend" /D "%ROOT%\frontend" cmd /k "npm run dev"
+set "WINDOW_TITLE_UI=LED Hoops UI"
+call "%ROOT%\scripts\kiosk\run-ui-prod.bat" 5173
+if errorlevel 1 goto :fail
 ping -n 5 127.0.0.1 >nul
 
 echo Waiting for game UI...
@@ -79,7 +83,7 @@ set /a _tries=0
 
 :wait_ui
 set /a _tries+=1
-powershell -NoProfile -Command "try { (Invoke-WebRequest -Uri 'http://localhost:5173' -UseBasicParsing -TimeoutSec 2).StatusCode } catch { exit 1 }" >nul 2>&1
+powershell -NoProfile -Command "try { (Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2).StatusCode } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 goto ui_ready
 if %_tries% GEQ 30 goto ui_timeout
 ping -n 2 127.0.0.1 >nul
@@ -97,16 +101,16 @@ echo Checking hardware mode...
 powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://localhost:8000/hw-debug' -TimeoutSec 5; if ($r.use_serial_hd) { Write-Host 'HARDWARE MODE: ON' } else { Write-Host 'ERROR: HARDWARE MODE OFF - floor will stay dark'; exit 2 } } catch { Write-Host 'WARNING: could not confirm hardware mode yet'; exit 0 }"
 if errorlevel 2 goto :fail
 
-start "" "http://localhost:5173"
+call "%ROOT%\scripts\kiosk\open-ui.bat" 5173 hoops
 
 echo.
 echo ========================================
 echo   LED HOOPS is running (HARDWARE)
-echo   Open:  http://localhost:5173
+echo   Open:  http://127.0.0.1:5173/
+echo   Ctrl+Shift+K exits fullscreen kiosk
 echo   To stop: double-click STOP_GAME.bat
 echo ========================================
 echo.
-pause
 exit /b 0
 
 :fail

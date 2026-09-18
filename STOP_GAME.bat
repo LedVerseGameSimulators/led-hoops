@@ -15,7 +15,11 @@ if /i not "%QUIET%"=="/quiet" (
 REM Kill by window titles started by START_GAME.bat
 taskkill /FI "WINDOWTITLE eq LED Hoops API*" /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq LED Hoops ws_bridge*" /T /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq LED Hoops UI*" /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq LED Hoops Frontend*" /T /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Activerse Kiosk Exit*" /T /F >nul 2>&1
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\kiosk\kill-kiosk-browser.ps1" -ProfileSlug hoops
 
 REM Also free ports (works even if window titles differ)
 powershell -NoProfile -Command ^

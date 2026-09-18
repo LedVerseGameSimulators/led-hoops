@@ -1,6 +1,7 @@
 @echo off
 REM Start Hoops dev stack (API 8000, ws_bridge 8765, UI 5173).
 setlocal
+set ACTIVERSE_KIOSK=0
 cd /d "%~dp0.."
 
 echo ==^> LED Hoops dev stack from %CD%
