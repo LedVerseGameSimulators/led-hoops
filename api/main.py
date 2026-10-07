@@ -4,13 +4,16 @@ Decoupled game logic from Tkinter UI. React frontend connects via HTTP + WebSock
 """
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
 import os
+from pathlib import Path
 from loguru import logger
 import datetime
 
 from .config import API_HOST, API_PORT, API_DEBUG, GAME_NAME, GAMES_ROOT
+from .runtime_paths import ui_dir
 from .models import (
     LoginRequest, LoginResponse, PlayerInfo,
     StartGameRequest, StartGameResponse,
@@ -79,6 +82,14 @@ async def login(request: LoginRequest) -> LoginResponse:
     except Exception as e:
         logger.error(f"Login error: {e}")
         return LoginResponse(success=False, error=str(e))
+
+
+# ============= MODE PLAYLISTS =============
+@app.get("/playlists")
+async def get_playlists():
+    """Canonical mode playlists (same as api/mode_playlists.json)."""
+    from .game_manager import _load_mode_playlists
+    return _load_mode_playlists()
 
 
 # ============= START GAME ENDPOINT =============
@@ -509,6 +520,9 @@ async def get_game_state():
 async def startup():
     logger.info(f"API starting on {API_HOST}:{API_PORT}")
     logger.info(f"Game: {GAME_NAME}")
+    logger.info(f"GAMES_ROOT: {GAMES_ROOT}")
+    _ui = ui_dir()
+    logger.info(f"UI dir: {_ui} (mounted={(_ui / 'index.html').is_file()})")
 
 
 @app.get("/hw-debug")
@@ -536,6 +550,18 @@ async def hw_debug():
 async def shutdown():
     logger.info("API shutting down")
     db.close()
+
+
+# ============= STATIC UI (mount LAST so API routes win) =============
+_ui_path = ui_dir()
+if _ui_path.is_dir() and (_ui_path / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=str(_ui_path), html=True), name="ui")
+    logger.info(f"Serving UI from {_ui_path}")
+else:
+    logger.warning(
+        f"UI not mounted (missing {_ui_path / 'index.html'}). "
+        "Build frontend or set UI_DIR for operator freeze."
+    )
 
 
 # ============= RUN =============

@@ -1,31 +1,6 @@
 /**
- * Placeholder playlists for Hoops FE redesign.
- * Real 20-level lists will replace these when the team delivers them.
- * Backend still receives real file ids (stems); UI may show 1..N.
- *
- * Casual 001…, level 14…, DK* advanced; tournament from source_group/-- (14–23).
- * Avoid Challenge* names in placeholder lists.
+ * Mode playlist helpers — ordered lists come from GET /playlists at runtime.
  */
-
-/** Quick Play (1P) — casual 001–011 + level 14–22. */
-export const QUICK_PLAY_LEVELS = [
-  '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011',
-  '14', '15', '16', '17', '18', '19', '20', '21', '22',
-]
-
-/** Team Battle (2P) — DK advanced + level 14–23 to fill 20 placeholders. */
-export const TEAM_BATTLE_LEVELS = [
-  'DK01', 'DK02', 'DK03', 'DK04', 'DK05', 'DK06', 'DK07', 'DK08', 'DK09', 'DK10',
-  '14', '15', '16', '17', '18', '19', '20', '21', '22', '23',
-]
-
-/**
- * Tournament playlist order (matches games/source_group/-- /
- * corporate Advance 14→23).
- */
-export const TOURNAMENT_LEVEL_ORDER = [
-  '14', '15', '16', '17', '18', '19', '20', '21', '22', '23',
-]
 
 export const HOW_TO = {
   single:
@@ -55,29 +30,42 @@ export const HOW_TO_BULLETS = {
   ],
 }
 
-export function playlistForMode(playMode) {
-  if (playMode === 'multi') return TEAM_BATTLE_LEVELS
-  if (playMode === 'group') return TOURNAMENT_LEVEL_ORDER
-  return QUICK_PLAY_LEVELS
+export function playlistModeKey(playMode) {
+  if (playMode === 'multi') return 'multi'
+  if (playMode === 'group') return 'group'
+  return 'single'
 }
 
-/** Map backend level stem → UI number (1-based) within the active playlist. */
-export function displayLevelNumber(playMode, levelId) {
+/** Entries for a play mode from API payload { single, multi, group }. */
+export function entriesForPlayMode(playlists, playMode) {
+  if (!playlists) return []
+  const key = playlistModeKey(playMode)
+  return playlists[key] || []
+}
+
+export function idsForPlayMode(playlists, playMode) {
+  return entriesForPlayMode(playlists, playMode).map((e) => e.id)
+}
+
+/** Map backend level stem → UI number (1-based) within the full mode playlist. */
+export function displayLevelNumber(playMode, levelId, playlists) {
   const stem = String(levelId ?? '')
     .replace(/\.(led|ledb)$/i, '')
     .trim()
   if (!stem || stem === 'auto') return null
-  const list = playlistForMode(playMode)
-  const idx = list.findIndex(
-    (id) => id === stem || stem.startsWith(id) || id.startsWith(stem)
-  )
+  const ids = idsForPlayMode(playlists, playMode)
+  const idx = ids.findIndex((id) => id === stem)
   if (idx >= 0) return idx + 1
-  if (/^\d+$/.test(stem)) return Number(stem)
   return null
 }
 
-export function formatLevelLabel(playMode, levelId) {
-  const n = displayLevelNumber(playMode, levelId)
+export function formatLevelLabel(playMode, levelId, playlists) {
+  const n = displayLevelNumber(playMode, levelId, playlists)
   if (n != null) return String(n)
   return String(levelId ?? '—')
+}
+
+export function firstPlaylistId(playlists, playMode) {
+  const entries = entriesForPlayMode(playlists, playMode)
+  return entries.length ? entries[0].id : null
 }

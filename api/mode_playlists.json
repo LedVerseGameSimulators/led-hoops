@@ -1,0 +1,38 @@
+{
+  "single": [
+    { "id": "006", "path": "games/source/-/006.led" },
+    { "id": "007", "path": "games/source/-/007.led" },
+    { "id": "008", "path": "games/source/-/008.led" },
+    { "id": "14", "path": "games/source/--/14.led" },
+    { "id": "15", "path": "games/source/--/15.led" },
+    { "id": "16", "path": "games/source/--/16.led" },
+    { "id": "17", "path": "games/source/--/17.led" },
+    { "id": "18", "path": "games/source/--/18.led" },
+    { "id": "19", "path": "games/source/--/19.led" },
+    { "id": "20", "path": "games/source/--/20.led" }
+  ],
+  "multi": [
+    { "id": "DK01", "path": "games/source/---/DK01.ledb" },
+    { "id": "DK02", "path": "games/source/---/DK02.ledb" },
+    { "id": "DK03", "path": "games/source/---/DK03.ledb" },
+    { "id": "DK04", "path": "games/source/---/DK04.ledb" },
+    { "id": "DK05", "path": "games/source/---/DK05.ledb" },
+    { "id": "DK06", "path": "games/source/---/DK06.ledb" },
+    { "id": "DK07", "path": "games/source/---/DK07.ledb" },
+    { "id": "DK08", "path": "games/source/---/DK08.ledb" },
+    { "id": "DK09", "path": "games/source/---/DK09.ledb" },
+    { "id": "DK10", "path": "games/source/---/DK10.ledb" }
+  ],
+  "group": [
+    { "id": "14", "path": "games/source_group/--/14.led" },
+    { "id": "15", "path": "games/source_group/--/15.led" },
+    { "id": "16", "path": "games/source_group/--/16.led" },
+    { "id": "17", "path": "games/source_group/--/17.led" },
+    { "id": "18", "path": "games/source_group/--/18.led" },
+    { "id": "19", "path": "games/source_group/--/19.led" },
+    { "id": "20", "path": "games/source_group/--/20.led" },
+    { "id": "21", "path": "games/source_group/--/21.led" },
+    { "id": "22", "path": "games/source_group/--/22.led" },
+    { "id": "23", "path": "games/source_group/--/23.led" }
+  ]
+}

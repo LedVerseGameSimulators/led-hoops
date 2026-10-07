@@ -3,8 +3,7 @@ import { useMemo, useState } from 'react'
 import VideoBackground from '../components/VideoBackground'
 import {
   HOW_TO_BULLETS,
-  QUICK_PLAY_LEVELS,
-  TEAM_BATTLE_LEVELS,
+  idsForPlayMode,
 } from '../levelPlaylists'
 
 const MODES = [
@@ -35,13 +34,13 @@ const MODES = [
  * Setup = Mode + Level on one screen.
  * Tournament: no level pick — playlist is fixed.
  */
-export default function SetupScreen({ game = 'hoops', onConfirm }) {
+export default function SetupScreen({ game = 'hoops', playlists, onConfirm }) {
   const [mode, setMode] = useState('single')
   const [selectedIndex, setSelectedIndex] = useState(0)
 
   const isTournament = mode === 'group'
   const isTeam = mode === 'multi'
-  const ids = isTeam ? TEAM_BATTLE_LEVELS : QUICK_PLAY_LEVELS
+  const ids = idsForPlayMode(playlists, isTournament ? 'group' : mode)
   const modeMeta = MODES.find((m) => m.id === mode) || MODES[0]
 
   const bullets = useMemo(() => {
@@ -117,13 +116,12 @@ export default function SetupScreen({ game = 'hoops', onConfirm }) {
               <div className="level-grid" role="listbox" aria-label="Levels">
                 {ids.map((id, i) => (
                   <button
-                    key={id}
+                    key={`${mode}-${i}`}
                     type="button"
                     role="option"
                     aria-selected={selectedIndex === i}
-                    className={`level-chip ${selectedIndex === i ? 'is-selected' : ''}`}
+                    className={`level-chip${selectedIndex === i ? ' is-selected' : ''}`}
                     onClick={() => setSelectedIndex(i)}
-                    title={id}
                   >
                     {i + 1}
                   </button>
@@ -133,23 +131,30 @@ export default function SetupScreen({ game = 'hoops', onConfirm }) {
           ) : (
             <div className="setup-head">
               <p className="setup-kicker">Tournament</p>
-              <p className="setup-mode-name">Fixed level set · no pick</p>
+              <p className="setup-mode-name">
+                {ids.length ? `${ids.length} levels in order` : 'Loading playlists…'}
+              </p>
             </div>
           )}
 
-          <div className="howto">
-            <p className="howto-title">How to play — {modeMeta.title}</p>
-            <ul className="howto-list">
+          <div className="setup-howto">
+            <p className="setup-kicker">How to play</p>
+            <ul>
               {bullets.map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
           </div>
-        </section>
 
-        <button type="button" className="btn-primary setup-ready" onClick={handleReady}>
-          I&apos;m Ready
-        </button>
+          <button
+            type="button"
+            className="btn-primary setup-ready"
+            disabled={!isTournament && !ids.length}
+            onClick={handleReady}
+          >
+            Ready
+          </button>
+        </section>
       </div>
     </div>
   )
