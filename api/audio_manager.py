@@ -13,6 +13,7 @@ from .config import GAMES_ROOT
 _CMD_STOP_BGM = "stop_bgm"
 _CMD_START_BGM = "start_bgm"
 _CMD_PLAY_SFX = "play_sfx"
+_CMD_PLAY_TRANSITION = "play_transition"
 _CMD_SHUTDOWN = "shutdown"
 
 
@@ -84,8 +85,28 @@ class AudioManager:
                         ch = self._mixer.find_channel(True)
                         if ch:
                             ch.play(self._mixer.Sound(path))
+                elif cmd == _CMD_PLAY_TRANSITION:
+                    self._play_transition_locked(payload)
             except Exception as exc:
                 logger.warning(f"Audio worker error ({cmd}): {exc}")
+
+    def _play_transition_locked(self, path: str | None) -> None:
+        """Stop looping BGM, then play transition stinger (music channel, one-shot)."""
+        self._stop_bgm_locked()
+        if not path or not os.path.isfile(path):
+            logger.warning(f"Transition stinger missing: {path}")
+            return
+        try:
+            self._mixer.music.load(path)
+            self._mixer.music.play(0)
+        except Exception as exc:
+            logger.warning(f"Transition stinger (music) failed: {exc}")
+            try:
+                ch = self._mixer.find_channel(True)
+                if ch:
+                    ch.play(self._mixer.Sound(path))
+            except Exception as exc2:
+                logger.warning(f"Transition stinger (sfx) failed: {exc2}")
 
     def _stop_bgm_locked(self) -> None:
         self._bgm_playing = False
@@ -132,6 +153,12 @@ class AudioManager:
 
     def play_score_negative(self) -> None:
         self.play_sfx(self._score_neg)
+
+    def play_transition_stinger(self) -> None:
+        """Level clear/fail transition — must be audible over stopped BGM."""
+        if not self._enabled:
+            return
+        self._put(_CMD_PLAY_TRANSITION, self.transition_stinger)
 
     def shutdown(self) -> None:
         if self._thread and self._thread.is_alive():

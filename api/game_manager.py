@@ -693,9 +693,11 @@ def _play_led_panel(
         return
 
     board_time = _effect_board_time(dict_group)
-    if audio_mgr:
-        audio_mgr.stop_bgm()
-        if stinger:
+    if audio_mgr and stinger:
+        if hasattr(audio_mgr, "play_transition_stinger"):
+            audio_mgr.play_transition_stinger()
+        else:
+            audio_mgr.stop_bgm()
             audio_mgr.play_sfx(stinger)
 
     def _effect_frame(play_self, dgroup, time_pass, total_pass):

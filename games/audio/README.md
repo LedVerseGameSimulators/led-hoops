@@ -1,13 +1,3 @@
-# Hoops audio assets
-
-Canonical paths used by `api/audio_manager.py`:
-
-| File | Use |
-|------|-----|
-| `bgm_thank_you_not_so_bad.mp3` | Gameplay BGM (from venue pack) |
-| `score_positive.mp3` | Goal / +score |
-| `score_negative.mp3` | Penalty / miss |
-| `countdown_tick.mp3` | 3-2-1 ticks (**stock** placeholder tone for now) |
-| `transition_stinger.mp3` | Level clear + fail (**stock** placeholder tone for now) |
-
-Replace tick/stinger with final branded assets when available.
+version https://git-lfs.github.com/spec/v1
+oid sha256:b7aca90eceeee5377658cd79c89a7bc1636b5210e34a8971cc2b925169da1a01
+size 479
