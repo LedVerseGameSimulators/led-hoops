@@ -177,11 +177,15 @@ class AudioManager:
     def play_score_negative(self) -> None:
         self.play_sfx(self._score_neg)
 
-    def play_transition_stinger(self) -> None:
-        """Level clear/fail transition — must be audible over stopped BGM."""
+    def play_transition_stinger(self, phase: str = "level_clear") -> None:
+        """Level clear/fail panel clip (level_clear.mp3 / level_fail.mp3)."""
         if not self._enabled:
             return
-        self._put(_CMD_PLAY_TRANSITION, self.transition_stinger)
+        name = "level_fail.mp3" if phase == "level_fail" else "level_clear.mp3"
+        path = Path(self.transition_stinger).parent / name
+        if not path.is_file():
+            path = Path(self.transition_stinger)
+        self._put(_CMD_PLAY_TRANSITION, str(path))
 
     def shutdown(self) -> None:
         if self._thread and self._thread.is_alive():

@@ -701,7 +701,7 @@ def _play_led_panel(
         if phase not in ("level_clear", "level_fail", "session_end"):
             return
         if hasattr(audio_mgr, "play_transition_stinger"):
-            audio_mgr.play_transition_stinger()
+            audio_mgr.play_transition_stinger(phase)
         elif stinger:
             audio_mgr.stop_bgm()
             audio_mgr.play_sfx(stinger)
