@@ -665,6 +665,7 @@ def _play_led_panel(
 ):
     """Run one transition .led panel on the marathon thread."""
     game.begin_level_transition()
+    game._panel_stinger_sent = False
     initial_step = 3 if countdown_ticks else None
     game._last_countdown_step = initial_step
     game.update_state(
@@ -693,16 +694,24 @@ def _play_led_panel(
         return
 
     board_time = _effect_board_time(dict_group)
-    if audio_mgr:
-        if stinger and hasattr(audio_mgr, "play_transition_stinger"):
+
+    def _maybe_play_panel_stinger() -> None:
+        if not audio_mgr or getattr(game, "_panel_stinger_sent", False):
+            return
+        if phase not in ("level_clear", "level_fail", "session_end"):
+            return
+        if hasattr(audio_mgr, "play_transition_stinger"):
             audio_mgr.play_transition_stinger()
         elif stinger:
             audio_mgr.stop_bgm()
             audio_mgr.play_sfx(stinger)
+        game._panel_stinger_sent = True
 
     def _effect_frame(play_self, dgroup, time_pass, total_pass):
         if not game.running:
             return False
+        if total_pass < 0.05:
+            _maybe_play_panel_stinger()
         session_elapsed = time.time() - game.session_start
         led_display = _build_effect_led_display(dgroup, total_pass, led_table)
         countdown_step = None
