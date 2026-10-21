@@ -55,9 +55,11 @@ def session_test_env(*, level_sequence=None, game_time_sec=120.0, life_value=8):
     seq = level_sequence or [TINY_A]
     game_manager._settings_cache = None
 
+    env = {"HOOPS_EFFECTS_DIR": str(EFFECTS_DIR), "ALLOW_LEGACY_MARATHON": "1"}
     with mock.patch("api.game_manager.load_real_settings", return_value=settings), \
          mock.patch("api.game_manager._build_level_sequence", return_value=list(seq)), \
-         mock.patch.dict(os.environ, {"HOOPS_EFFECTS_DIR": str(EFFECTS_DIR)}, clear=False), \
+         mock.patch("api.game_manager._mode_playlists_active", return_value=False), \
+         mock.patch.dict(os.environ, env, clear=False), \
          mock.patch("api.game_manager.time.sleep", side_effect=_fast_sleep):
         game_manager.get_manager().clear_all()
         yield

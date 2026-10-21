@@ -235,51 +235,71 @@ class HardwareInitializationTests(unittest.TestCase):
 
 
 class HardwareStartFailureTests(unittest.TestCase):
-    def test_hardware_init_failure_aborts_before_import_play_or_load_levels(self):
+    def test_hardware_init_failure_continues_simulator_play(self):
+        """HW init soft-fails (e6ca178): session still loads levels in sim mode."""
         manager = game_manager.GameManager()
+        level_path = REPO_ROOT / "games" / "source" / "-" / "001.led"
+        settings = dict(game_manager._SETTINGS_DEFAULTS)
         with mock.patch.object(
             game_manager,
             "load_real_settings",
-            return_value=dict(game_manager._SETTINGS_DEFAULTS),
+            return_value=settings,
         ):
-            game_id = manager.create_game("card", 1, "normal")
+            game_id = manager.create_game("card", "006", "normal")
         game = manager.get_game(game_id)
-        forbidden_imports = []
-        real_import = __import__
 
-        def guarded_import(name, *args, **kwargs):
-            if name.startswith(("game_play", "model.setting")):
-                forbidden_imports.append(name)
-                raise AssertionError(f"forbidden game import: {name}")
-            return real_import(name, *args, **kwargs)
+        class FakePlay:
+            def __init__(self, led_table, setting, callback, game_level):
+                self.obj_led_table = led_table
+                self.callback = callback
+                self.total_pass = 0
+                self.running_state = True
 
+            def running(self, groups):
+                self.total_pass = 1.0
+                return self.callback(self, groups, 0.01, self.total_pass)
+
+            def running_by_blue(self, groups):
+                return self.running(groups)
+
+        class ImmediateThread:
+            def __init__(self, target, daemon):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def join(self, timeout=None):
+                pass
+
+            def is_alive(self):
+                return False
+
+        legacy_env = {"ALLOW_LEGACY_MARATHON": "1"}
         with (
             mock.patch.object(game_manager, "USE_SERIAL_HD", True),
             mock.patch.object(game_manager, "_hw_init", return_value=None),
+            mock.patch.object(game_manager, "_mode_playlists_active", return_value=False),
+            mock.patch.dict(os.environ, legacy_env, clear=False),
             mock.patch.object(
                 game_manager,
                 "_build_level_sequence",
-                side_effect=AssertionError("levels must not load"),
+                return_value=[str(level_path)],
             ),
-            mock.patch("builtins.__import__", side_effect=guarded_import),
+            mock.patch.object(game_manager, "_hw_blank_floor"),
+            mock.patch.object(game_manager.time, "time", return_value=100.0),
+            mock.patch.object(game_manager.time, "sleep"),
+            mock.patch.object(game_manager.threading, "Thread", ImmediateThread),
+            mock.patch("game_play.Play.Play", FakePlay),
         ):
             manager.start_game(game_id)
             game.thread.join(timeout=2)
 
         self.assertFalse(game.thread.is_alive())
-        self.assertEqual(forbidden_imports, [])
-        self.assertIsNone(game.play)
-        self.assertIsNone(game.led_table)
-        self.assertFalse(game.running)
-        self.assertFalse(game.accepting_input)
-        self.assertTrue(game._session_over)
-        self.assertEqual(game._end_reason, "hardware_error")
-        self.assertEqual(
-            game.get_state()["game_over_reason"],
-            "hardware_error",
-        )
-        self.assertEqual(game.get_state()["result"], 0)
-        self.assertTrue(game.get_state()["game_over"])
+        self.assertIsNotNone(game.led_table)
+        self.assertNotEqual(getattr(game, "_end_reason", None), "hardware_error")
+        state = game.get_state()
+        self.assertNotEqual(state.get("game_over_reason"), "hardware_error")
 
 
 if __name__ == "__main__":

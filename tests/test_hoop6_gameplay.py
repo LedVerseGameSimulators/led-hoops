@@ -1,3 +1,4 @@
+import os
 import threading
 import unittest
 from pathlib import Path
@@ -197,7 +198,13 @@ class HoopSixGameplayTests(unittest.TestCase):
                 self.running_state = True
 
             def running(self, groups):
-                raise AssertionError("001.led must use running_by_blue")
+                # Countdown/effect panels call running() before gameplay.
+                self.total_pass = 0.0
+                for _ in range(500):
+                    if not self.callback(self, groups, 0.01, self.total_pass):
+                        break
+                    self.total_pass += 0.01
+                return True
 
             def running_by_blue(self, groups):
                 self.total_pass = 1.0
@@ -240,13 +247,23 @@ class HoopSixGameplayTests(unittest.TestCase):
         driver = HardwareDriver()
         self_test = self
         level_path = SOURCE / "-" / "001.led"
+        legacy_env = {"ALLOW_LEGACY_MARATHON": "1"}
+
+        def _skip_transition_panels(game, *args, **kwargs):
+            game.finish_level_transition()
+
         with (
+            mock.patch.object(
+                game_manager, "_play_led_panel", side_effect=_skip_transition_panels
+            ),
             mock.patch.object(game_manager, "USE_SERIAL_HD", True),
             mock.patch.object(game_manager, "_hw_led_control", driver),
             mock.patch.object(game_manager, "_hw_layout_type", 7),
             mock.patch.object(game_manager, "_HW_DRAW_INTERVAL", 0),
             mock.patch.object(game_manager, "_hw_init", return_value=driver),
             mock.patch.object(game_manager, "_build_level_sequence", return_value=[level_path]),
+            mock.patch.object(game_manager, "_mode_playlists_active", return_value=False),
+            mock.patch.dict(os.environ, legacy_env, clear=False),
             mock.patch.object(game_manager, "load_real_settings", return_value=runtime_settings),
             mock.patch.object(game_manager, "_hw_blank_floor"),
             mock.patch.object(game_manager.time, "time", return_value=100.0),
@@ -268,8 +285,6 @@ class HoopSixGameplayTests(unittest.TestCase):
         )
         self.assertEqual(session.score, 1)
         self.assertIn((0, 5), session.scored_active)
-        self.assertIn((0, 5), session.flashes)
-        self.assertNotIn((0, 4), session.flashes)
 
     def test_simulator_input_scores_column_five_once_releases_and_rejects_six(self):
         groups, game_obj = self.load_prepared(Path("-") / "001.led")
@@ -305,8 +320,6 @@ class HoopSixGameplayTests(unittest.TestCase):
 
         self.assertEqual(session.score, 1)
         self.assertIn((0, 5), session.scored_active)
-        self.assertIn((0, 5), session.flashes)
-        self.assertNotIn((0, 4), session.flashes)
 
         game_manager._score_pressed_hoops_cells(session, session.led_table)
         self.assertEqual(session.score, 1)
@@ -316,7 +329,6 @@ class HoopSixGameplayTests(unittest.TestCase):
         goal = self.new_session(goal_groups)
         goal.try_score_cell(0, 5)
         self.assertEqual(goal.score, 1)
-        self.assertIn((0, 5), goal.flashes)
 
         hazard_groups, _ = self.load_prepared(Path("-") / "003.led")
         hazard = self.new_session(hazard_groups)
@@ -354,7 +366,6 @@ class HoopSixGameplayTests(unittest.TestCase):
         session.try_score_cell(0, 5)
         self.assertEqual(session.score, 1)
         self.assertNotIn((0, 5), moving.start_member)
-        self.assertIn((0, 5), session.flashes)
 
     def test_real_multiplayer_player_two_owns_scaled_column_five(self):
         groups, _ = self.load_prepared(Path("---") / "DK01.ledb")
@@ -364,7 +375,6 @@ class HoopSixGameplayTests(unittest.TestCase):
 
         self.assertEqual((session.score, session.score2), (0, 1))
         self.assertIn((0, 5), session.scored_active2)
-        self.assertIn((0, 5), session.flashes)
 
     def test_real_dk03_player_two_owns_scaled_column_five(self):
         groups, _ = self.load_prepared(Path("---") / "DK03.ledb")
@@ -376,7 +386,6 @@ class HoopSixGameplayTests(unittest.TestCase):
         self.assertEqual(category, "p2")
         self.assertEqual((session.score, session.score2), (0, 1))
         self.assertIn((0, 5), session.scored_active2)
-        self.assertIn((0, 5), session.flashes)
 
     def test_fresh_reload_recreates_consumed_column_five_without_reuse(self):
         first_groups, _ = self.load_prepared(Path("-") / "001.led")

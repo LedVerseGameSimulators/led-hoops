@@ -121,6 +121,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings["floor_layout_coors_no_use"], [(0, 3)])
 
     def test_load_real_settings_preserves_present_invalid_platform_values(self):
+        game_manager._settings_cache = None
         class FakeShelf(dict):
             def close(self):
                 pass

@@ -1,6 +1,7 @@
 """Phase A smoke: publish P1/P2 goal colors only; hazard scoring unchanged."""
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -157,11 +158,14 @@ class PhaseAGoalColorPublishTests(unittest.TestCase):
         manager = game_manager.GameManager()
         manager.games[session.game_id] = session
 
+        legacy_env = {"ALLOW_LEGACY_MARATHON": "1"}
         with (
             mock.patch.object(game_manager, "USE_SERIAL_HD", False),
             mock.patch.object(
                 game_manager, "_build_level_sequence", return_value=[level_path]
             ),
+            mock.patch.object(game_manager, "_mode_playlists_active", return_value=False),
+            mock.patch.dict(os.environ, legacy_env, clear=False),
             mock.patch.object(
                 game_manager, "load_real_settings", return_value=fake_settings
             ),
