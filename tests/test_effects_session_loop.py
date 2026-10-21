@@ -256,7 +256,13 @@ class EffectsSessionLoopTests(unittest.TestCase):
                     phase = state.get("phase")
                     if phase and (not phases or phases[-1] != phase):
                         phases.append(phase)
-                    if phase == "playing" and state.get("accepting_input"):
+                    # Drain life only before the fail panel; never press after refill.
+                    if (
+                        phase == "playing"
+                        and state.get("accepting_input")
+                        and phases.count("level_fail") == 0
+                        and (state.get("life") or 0) > 0
+                    ):
                         client.post(
                             "/game-input",
                             json={"game_id": game_id, "row": 0, "col": 0, "type": "press"},
@@ -265,11 +271,13 @@ class EffectsSessionLoopTests(unittest.TestCase):
                         phase == "playing"
                         and phases.count("level_fail") == 1
                         and state.get("accepting_input") is True
+                        and state.get("life") == 4
                     ):
                         break
                 self.assertIn("level_fail", phases)
                 fail_idx = phases.index("level_fail")
                 self.assertEqual(phases[fail_idx + 1], "countdown")
+                self.assertIn("playing", phases[fail_idx + 2 :])
                 self.assertEqual(final.get("current_level"), "tiny")
                 self.assertEqual(final.get("score"), score_before - 4)
                 self.assertEqual(final.get("life"), 4)

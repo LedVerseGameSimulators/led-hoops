@@ -967,10 +967,16 @@ def _run_level_attempt(
             if hasattr(game, "update_state"):
                 # Publish HUD swatches as soon as the level is set up (not only
                 # on the first frame callback).
+                _life = getattr(game, "life", 0)
+                _max_life = getattr(game, "max_life", _life)
                 game.update_state(
                     phase="playing",
                     accepting_input=True,
                     countdown_step=None,
+                    life=_life,
+                    max_life=_max_life,
+                    display_lives=math.ceil(_life / 4),
+                    display_max=math.ceil(_max_life / 4),
                     multiplayer=bool(getattr(game, "multiplayer", False)),
                     goal_color=(list(game.goal_color)
                                 if getattr(game, "multiplayer", False)
