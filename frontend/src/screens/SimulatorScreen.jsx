@@ -1,7 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
 
-import { API_URL, WS_BRIDGE_URL } from '../config'
+import { API_URL, WS_BRIDGE_URL, RFID_API_URL } from '../config'
 import { formatLevelLabel, firstPlaylistId } from '../levelPlaylists'
+import {
+  saveGameResumeContext,
+  clearGameResumeContext,
+} from '../gameResumeStorage'
 
 function countdownDisplay(state) {
   if (!state || state.phase !== 'countdown') return null
@@ -29,6 +33,50 @@ function effectivePlayerCount(config) {
   if ((config.playerCount || 1) >= 2) return 2
   if (String(config.level || '').toUpperCase().startsWith('DK')) return 2
   return config.playerCount || 1
+}
+
+function playModeToRfid(playMode) {
+  if (playMode === 'multi') return 'team_battle'
+  if (playMode === 'group') return 'tournament'
+  return 'quick_play'
+}
+
+const VALIDATE_TIMEOUT_MS = 2000
+
+async function refreshRfidContext(cardId) {
+  const id = String(cardId ?? '').trim()
+  if (!id) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), VALIDATE_TIMEOUT_MS)
+  try {
+    const res = await fetch(
+      `${RFID_API_URL}/validate?card_id=${encodeURIComponent(id)}`,
+      { signal: controller.signal }
+    )
+    const data = await res.json()
+    if (!data?.valid) return null
+    return {
+      session_id: data.session_id ?? null,
+      group_id: data.group_id ?? null,
+      roster_size: data.roster_size ?? null,
+      roster_player_ids: data.roster_player_ids ?? null,
+    }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function mergeRfidContext(loginCtx, refreshed) {
+  const base = loginCtx || {}
+  const fresh = refreshed || {}
+  return {
+    session_id: fresh.session_id ?? base.session_id ?? null,
+    group_id: fresh.group_id ?? base.group_id ?? null,
+    roster_size: fresh.roster_size ?? base.roster_size ?? null,
+    roster_player_ids: fresh.roster_player_ids ?? base.roster_player_ids ?? null,
+  }
 }
 
 function HeartRow({ life, maxLife }) {
@@ -103,6 +151,7 @@ export default function SimulatorScreen({ config, playlists, onGameEnd }) {
         if (data.success) {
           setGameId(data.game_id)
           gameIdRef.current = data.game_id
+          saveGameResumeContext(data.game_id, config)
           setLoading(false)
         } else {
           setError(data.error || 'Failed to start game')
@@ -125,6 +174,7 @@ export default function SimulatorScreen({ config, playlists, onGameEnd }) {
         if (data.success && (!want2P || data.state?.multiplayer)) {
           setGameId(config.resumeGameId)
           gameIdRef.current = config.resumeGameId
+          saveGameResumeContext(config.resumeGameId, config)
           setLoading(false)
           return
         }
@@ -168,12 +218,42 @@ export default function SimulatorScreen({ config, playlists, onGameEnd }) {
 
     try {
       if (hasRfidCard) {
-        await fetch(`${API_URL}/save-score`, {
+        const loginSlot1 = {
+          session_id: config.sessionId ?? null,
+          group_id: config.groupId ?? null,
+          roster_size: config.rosterSize ?? null,
+          roster_player_ids: config.rosterPlayerIds ?? null,
+        }
+        const slot1 = mergeRfidContext(
+          loginSlot1,
+          await refreshRfidContext(config.cardId)
+        )
+        const hasCard2 = Boolean(config.cardId2 && String(config.cardId2).trim())
+        let slot2Fields = {}
+        if (hasCard2) {
+          const loginSlot2 = {
+            session_id: config.sessionId2 ?? null,
+            group_id: config.groupId2 ?? null,
+            roster_size: config.rosterSize2 ?? null,
+            roster_player_ids: config.rosterPlayerIds2 ?? null,
+          }
+          const slot2 = mergeRfidContext(
+            loginSlot2,
+            await refreshRfidContext(config.cardId2)
+          )
+          slot2Fields = {
+            session_id2: slot2.session_id,
+            group_id2: slot2.group_id,
+            roster_size_at_play2: slot2.roster_size,
+            roster_player_ids2: slot2.roster_player_ids,
+          }
+        }
+        const saveRes = await fetch(`${API_URL}/save-score`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             card_id: config.cardId,
-            card_id2: config.cardId2 || null,
+            card_id2: hasCard2 ? config.cardId2 : null,
             level: levelLabel,
             end_level: endLevelLabel,
             level_file: startStem,
@@ -192,8 +272,26 @@ export default function SimulatorScreen({ config, playlists, onGameEnd }) {
             started_at: st.started_at ?? '',
             player_name: config.playerName || '',
             player_name2: config.playerName2 || '',
+            play_mode: playModeToRfid(config.playMode),
+            session_id: slot1.session_id,
+            group_id: slot1.group_id,
+            roster_size_at_play: slot1.roster_size,
+            roster_player_ids: slot1.roster_player_ids,
+            ...slot2Fields,
           })
         })
+        if (!saveRes.ok) {
+          console.warn('[save-score] HTTP error', saveRes.status, saveRes.statusText)
+        } else {
+          try {
+            const saveBody = await saveRes.json()
+            if (!saveBody?.success) {
+              console.warn('[save-score] rejected by API', saveBody)
+            }
+          } catch (parseErr) {
+            console.warn('[save-score] invalid JSON response', parseErr)
+          }
+        }
       }
       // Always stop game (BGM + floor blank) — guests too
       if (id) {
@@ -206,6 +304,7 @@ export default function SimulatorScreen({ config, playlists, onGameEnd }) {
     } catch (err) {
       console.error('Stop/save error:', err)
     }
+    if (id) clearGameResumeContext(id)
     onGameEnd({
       score: finalScore,
       score2: finalScore2,

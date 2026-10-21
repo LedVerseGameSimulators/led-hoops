@@ -8,6 +8,31 @@ function normalizeCardId(raw) {
   return String(raw ?? '').replace(/[\r\n]/g, '').trim()
 }
 
+function cardsEqualIgnoreCase(a, b) {
+  const x = normalizeCardId(a).toLowerCase()
+  const y = normalizeCardId(b).toLowerCase()
+  return Boolean(x && y && x === y)
+}
+
+/** Prefer /validate card_id when present; else trimmed scan value. */
+function canonicalCardId(validateData, scanned) {
+  const fromApi = validateData?.card_id
+  if (fromApi != null && String(fromApi).trim()) {
+    return normalizeCardId(fromApi)
+  }
+  return normalizeCardId(scanned)
+}
+
+function teamBattleGroupConflict(infoA, infoB) {
+  if (!infoA?.valid || !infoB?.valid) return null
+  const g1 = infoA.group_id
+  const g2 = infoB.group_id
+  if (g1 != null && g2 != null && g1 === g2) {
+    return 'Team Battle needs two different groups — scan the other team’s leader card'
+  }
+  return null
+}
+
 function validationError(data) {
   if (data.reason === 'insufficient_time') {
     return `Not enough time (${data.minutes_remaining} min left). Need at least 5 min.`
@@ -22,6 +47,17 @@ async function validateRfidCard(cardId) {
     `${RFID_API_URL}/validate?card_id=${encodeURIComponent(cardId)}`
   )
   return res.json()
+}
+
+/** RFID session context from /validate (stored on game config for save-score). */
+export function rfidContextFromValidate(data) {
+  if (!data?.valid) return null
+  return {
+    session_id: data.session_id ?? null,
+    group_id: data.group_id ?? null,
+    roster_size: data.roster_size ?? null,
+    roster_player_ids: data.roster_player_ids ?? null,
+  }
 }
 
 export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount = 1, onBack }) {
@@ -77,9 +113,9 @@ export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount 
 
     if (playerCount === 2) {
       const other = which === 1
-        ? normalizeCardId(card2Ref.current?.value || card2)
-        : normalizeCardId(card1Ref.current?.value || card1)
-      if (other && cardId === other) {
+        ? (card2Ref.current?.value || card2)
+        : (card1Ref.current?.value || card1)
+      if (other && cardsEqualIgnoreCase(cardId, other)) {
         setError('Each player needs a different card')
         if (which === 1) {
           setP1Info(null)
@@ -98,13 +134,48 @@ export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount 
     try {
       const data = await validateRfidCard(cardId)
       if (data.valid) {
+        const canonical = canonicalCardId(data, cardId)
+        if (playerCount === 2) {
+          const peerCard = which === 1 ? validatedCard2 : validatedCard1
+          const peerInfo = which === 1 ? p2Info : p1Info
+          if (peerCard && cardsEqualIgnoreCase(canonical, peerCard)) {
+            setError('Each player needs a different card')
+            if (which === 1) {
+              setP1Info(null)
+              setValidatedCard1('')
+            } else {
+              setP2Info(null)
+              setValidatedCard2('')
+            }
+            return
+          }
+          if (peerInfo?.valid) {
+            const grpErr = teamBattleGroupConflict(
+              which === 1 ? data : peerInfo,
+              which === 1 ? peerInfo : data
+            )
+            if (grpErr) {
+              setError(grpErr)
+              if (which === 1) {
+                setP1Info(null)
+                setValidatedCard1('')
+              } else {
+                setP2Info(null)
+                setValidatedCard2('')
+              }
+              return
+            }
+          }
+        }
         ok = true
         if (which === 1) {
           setP1Info(data)
-          setValidatedCard1(cardId)
+          setValidatedCard1(canonical)
+          setCard1(canonical)
         } else {
           setP2Info(data)
-          setValidatedCard2(cardId)
+          setValidatedCard2(canonical)
+          setCard2(canonical)
         }
       } else {
         if (which === 1) {
@@ -151,9 +222,16 @@ export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount 
 
   const handleStartGame = () => {
     if (!canStart || validating) return
-    if (playerCount === 2 && validatedCard1 === validatedCard2) {
+    if (playerCount === 2 && cardsEqualIgnoreCase(validatedCard1, validatedCard2)) {
       setError('Each player needs a different card')
       return
+    }
+    if (playerCount === 2) {
+      const grpErr = teamBattleGroupConflict(p1Info, p2Info)
+      if (grpErr) {
+        setError(grpErr)
+        return
+      }
     }
     onLogin(
       validatedCard1,
@@ -161,7 +239,9 @@ export default function LoginScreen({ gameTitle = 'Hoops', onLogin, playerCount 
       p1Info.player_name || '',
       p2Info?.player_name || '',
       p1Info.minutes_remaining ?? null,
-      p2Info?.minutes_remaining ?? null
+      p2Info?.minutes_remaining ?? null,
+      rfidContextFromValidate(p1Info),
+      playerCount === 2 ? rfidContextFromValidate(p2Info) : null
     )
   }
 

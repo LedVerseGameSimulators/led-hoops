@@ -7,6 +7,10 @@ import ResultScreen    from './screens/ResultScreen'
 
 import { API_URL } from './config'
 import VideoBackground from './components/VideoBackground'
+import {
+  loadGameResumeContext,
+  mergeResumeIntoConfig,
+} from './gameResumeStorage'
 
 const S = {
   SETUP:     'setup',      // Mode + Level (one screen)
@@ -28,6 +32,14 @@ const DEFAULT_CONFIG = {
   playerName2: '',
   minutesRemaining: null,
   minutesRemaining2: null,
+  sessionId: null,
+  groupId: null,
+  rosterSize: null,
+  rosterPlayerIds: null,
+  sessionId2: null,
+  groupId2: null,
+  rosterSize2: null,
+  rosterPlayerIds2: null,
 }
 
 export default function App() {
@@ -51,14 +63,18 @@ export default function App() {
         if (d.success) {
           const isDk = String(d.level || '').toUpperCase().startsWith('DK')
           const players = Math.max(d.player_count || 1, isDk ? 2 : 1)
-          setGameConfig((prev) => ({
-            ...prev,
-            cardId: d.card_id,
-            level: d.level,
-            difficulty: d.difficulty,
-            playerCount: players,
-            resumeGameId: d.game_id,
-          }))
+          const stored = loadGameResumeContext(d.game_id)
+          setGameConfig((prev) => {
+            const base = {
+              ...prev,
+              cardId: d.card_id,
+              level: d.level,
+              difficulty: d.difficulty,
+              playerCount: players,
+              resumeGameId: d.game_id,
+            }
+            return stored ? mergeResumeIntoConfig(base, stored) : base
+          })
           setScreen(S.SIMULATOR)
         }
       })
@@ -86,7 +102,9 @@ export default function App() {
     playerName = '',
     playerName2 = '',
     minutesRemaining = null,
-    minutesRemaining2 = null
+    minutesRemaining2 = null,
+    rfid1 = null,
+    rfid2 = null
   ) => {
     setGameConfig((prev) => ({
       ...prev,
@@ -96,6 +114,14 @@ export default function App() {
       playerName2: playerName2 || '',
       minutesRemaining,
       minutesRemaining2,
+      sessionId: rfid1?.session_id ?? null,
+      groupId: rfid1?.group_id ?? null,
+      rosterSize: rfid1?.roster_size ?? null,
+      rosterPlayerIds: rfid1?.roster_player_ids ?? null,
+      sessionId2: rfid2?.session_id ?? null,
+      groupId2: rfid2?.group_id ?? null,
+      rosterSize2: rfid2?.roster_size ?? null,
+      rosterPlayerIds2: rfid2?.roster_player_ids ?? null,
     }))
     setScreen(S.COUNTDOWN)
   }
