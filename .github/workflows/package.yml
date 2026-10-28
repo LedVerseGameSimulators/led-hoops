@@ -1,0 +1,77 @@
+name: Package operator build
+
+# Binary-only operator package (no Python/JS source). Manual run = build + smoke
+# + downloadable artifact. A v* tag also publishes a GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-nuitka:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Fail on LFS pointer stubs in data dirs
+        shell: bash
+        run: |
+          stubs=$(grep -rl "^version https://git-lfs" games/source games/source_group games/audio 2>/dev/null | head -5 || true)
+          if [ -n "$stubs" ]; then echo "LFS pointers not resolved:"; echo "$stubs"; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build (Nuitka)
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_RUN_NUMBER)" }
+          powershell -File packaging\build_nuitka_windows.ps1 -Tag $tag
+
+      - name: Gate - no source in package
+        shell: pwsh
+        run: |
+          $stage = Get-ChildItem dist\release -Directory | Select-Object -First 1
+          $bad = Get-ChildItem $stage.FullName -Recurse -Include *.py,*.pyc,*.sqlite
+          if ($bad) { $bad | Select-Object -First 20 FullName; throw "forbidden files in package" }
+
+      - name: Smoke - simulator stack comes up from the frozen exe
+        shell: pwsh
+        run: |
+          $stage = (Get-ChildItem dist\release -Directory | Select-Object -First 1).FullName
+          $exe = Join-Path $stage "LED Hoops.exe"
+          & $exe --selftest | Tee-Object selftest.txt
+          $p = Start-Process -FilePath $exe -ArgumentList "--sim","--no-browser" -PassThru
+          $ok = $false
+          foreach ($i in 1..45) {
+            Start-Sleep 2
+            try { if ((Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ok = $true; break } } catch {}
+          }
+          if (-not $ok) { Get-Content "$stage\logs\*.log" -ErrorAction SilentlyContinue | Select-Object -Last 80; throw "UI/API did not come up" }
+          $pl = Invoke-RestMethod http://127.0.0.1:8000/playlists
+          if ($pl.single.Count -lt 1) { throw "playlists empty" }
+          $hw = Invoke-RestMethod http://127.0.0.1:8000/hw-debug
+          Write-Host "hw-debug: $($hw | ConvertTo-Json -Compress)"
+          $br = Invoke-WebRequest http://127.0.0.1:8765/docs -UseBasicParsing -TimeoutSec 5
+          & $exe --stop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LED-Hoops-windows-nuitka
+          path: dist/release/*.zip
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release/*.zip
