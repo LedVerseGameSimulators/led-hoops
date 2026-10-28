@@ -12,7 +12,8 @@ from model.setting import Setting
 from util import util_program
 import gui.language as language
 
-_GAMES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Frozen (Nuitka) builds report __file__ under the install root, not games/; the supervisor exports GAMES_ROOT.
+_GAMES_DIR = os.environ.get('GAMES_ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEBUG_PARAM = os.path.join(_GAMES_DIR, 'setting', 'debug_parameter')
 
 class LedControl:

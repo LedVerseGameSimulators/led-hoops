@@ -29,8 +29,10 @@ try:
         validate_hardware_config,
         validate_platform_config,
     )
-except ImportError:  # pragma: no cover - package-relative fallback
-    from ..hardware_config import (  # type: ignore
+except ImportError:  # pragma: no cover - repo root not on sys.path yet
+    # (not `from ..hardware_config`: beyond-top-level relative imports crash Nuitka)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from hardware_config import (
         HardwareConfigError,
         parse_dimension,
         validate_hardware_config,

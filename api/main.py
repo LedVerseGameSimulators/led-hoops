@@ -557,6 +557,16 @@ async def shutdown():
 # ============= STATIC UI (mount LAST so API routes win) =============
 _ui_path = ui_dir()
 if _ui_path.is_dir() and (_ui_path / "index.html").is_file():
+    from fastapi.responses import HTMLResponse
+    from .activerse_config import inject_runtime_config
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/index.html", include_in_schema=False)
+    async def _ui_index():
+        # Read per request so edits to games/setting/activerse.json apply on reload.
+        html = (_ui_path / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(inject_runtime_config(html), headers={"Cache-Control": "no-store"})
+
     app.mount("/", StaticFiles(directory=str(_ui_path), html=True), name="ui")
     logger.info(f"Serving UI from {_ui_path}")
 else:
