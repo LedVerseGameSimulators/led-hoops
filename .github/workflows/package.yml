@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    # Pre-merge validation: workflow_dispatch only works once this file is on main.
+    branches: ["feature/k2b-binary-packaging"]
 
 permissions:
   contents: write
