@@ -1,17 +1,12 @@
-# Windows freeze scripts (placeholders — run on Windows PC/VM or CI windows-latest)
-#
-# Primary operator artifact: Nuitka
-#   packaging\build_nuitka_windows.ps1
-# Secondary fallback: PyInstaller onedir
-#   packaging\build_pyinstaller_windows.ps1
-#
-# These cannot be fully exercised on macOS. Mirror the Mac scripts:
-#   1. npm ci && npm run build
-#   2. Stage allowlist (ui/, games data, simulator/static, STOP, README)
-#   3. Freeze packaging\run_api.py → hoops-api.exe
-#      packaging\run_bridge.py → hoops-bridge.exe
-#      packaging\supervisor.py → "LED Hoops.exe"
-#   4. Assert no *.py in stage
-#   5. Zip as LED-Hoops-<tag>-nuitka-windows.zip / -pyinstaller-windows.zip
-#
-# See docs/PLAN_KIOSK_AND_PACKAGING.md (repo parent) for the locked matrix.
+# Operator packaging (K2b)
+
+Binary-only release: one Nuitka-compiled executable with roles, plus data.
+No `.py`/`.pyc` ships. See `docs/PLAN_KIOSK_AND_PACKAGING.md` in the umbrella repo.
+
+- `floor_launcher/` — the program (supervisor, api/bridge roles, `--selftest`, `--stop`)
+- `build_nuitka_macos.sh` / `build_nuitka_windows.ps1` — build + stage + zip
+- `stage_release.sh` / `stage_release.py` — data allowlist (tracked files only)
+- `.github/workflows/package.yml` — Windows CI build, gate, frozen smoke, artifact/release
+
+Local mac build:  `bash packaging/build_nuitka_macos.sh`
+Parity contract: the exe must behave exactly like `START_GAME.bat` (hardware ON by default).
