@@ -66,6 +66,65 @@ jobs:
           $br = Invoke-WebRequest http://127.0.0.1:8765/docs -UseBasicParsing -TimeoutSec 5
           & $exe --stop
 
+      # Informational (continue-on-error): results are printed in the log. These
+      # exercise the Windows-only behaviours that need no hardware.
+      - name: Check - hardware flag default (no serial device)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $stage = (Get-ChildItem dist\release -Directory | Select-Object -First 1).FullName
+          $exe = Join-Path $stage "LED Hoops.exe"
+          Start-Process -FilePath $exe -ArgumentList "--no-browser" -PassThru | Out-Null
+          $ok = $false
+          foreach ($i in 1..45) { Start-Sleep 2; try { if ((Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { $ok = $true; break } } catch {} }
+          Write-Host "RESULT api_up_in_hardware_mode=$ok"
+          if ($ok) {
+            $hw = Invoke-RestMethod http://127.0.0.1:8000/hw-debug
+            Write-Host "RESULT use_serial_hd_default=$($hw.use_serial_hd)"
+          }
+          Write-Host "--- api.console.log tail"; Get-Content "$stage\logs\api.console.log" -Tail 25 -ErrorAction SilentlyContinue
+          Write-Host "--- supervisor.log"; Get-Content "$stage\logs\supervisor.log" -ErrorAction SilentlyContinue
+          & $exe --stop
+          Start-Sleep 3
+          $up = $false; try { Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing -TimeoutSec 2 | Out-Null; $up = $true } catch {}
+          Write-Host "RESULT stop_freed_port=$(-not $up)"
+
+      - name: Check - kiosk, Ctrl+Shift+K hotkey, STOP
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $stage = (Get-ChildItem dist\release -Directory | Select-Object -First 1).FullName
+          $exe = Join-Path $stage "LED Hoops.exe"
+          function Kiosk { Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe'" | Where-Object { $_.CommandLine -like "*ActiverseKiosk*hoops*" } }
+          function Up { try { (Invoke-WebRequest http://127.0.0.1:8000/ -UseBasicParsing -TimeoutSec 2).StatusCode } catch { 0 } }
+          Start-Process -FilePath $exe -ArgumentList "--sim" | Out-Null
+          $ok = $false
+          foreach ($i in 1..45) { Start-Sleep 2; if ((Up) -eq 200) { $ok = $true; break } }
+          Write-Host "RESULT api_up=$ok"
+          Start-Sleep 10
+          $k = @(Kiosk)
+          Write-Host "RESULT kiosk_running_with_profile=$($k.Count -gt 0) procs=$($k.Count)"
+          $vis = Get-Process | Where-Object { $_.ProcessName -like "LED Hoops*" -and $_.MainWindowHandle -ne 0 }
+          Write-Host "RESULT no_visible_exe_window=$(-not $vis)"
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class Kb { [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); }
+          "@
+          [Kb]::keybd_event(0x11,0,0,[UIntPtr]::Zero); [Kb]::keybd_event(0x10,0,0,[UIntPtr]::Zero); [Kb]::keybd_event(0x4B,0,0,[UIntPtr]::Zero)
+          Start-Sleep -Milliseconds 150
+          [Kb]::keybd_event(0x4B,0,2,[UIntPtr]::Zero); [Kb]::keybd_event(0x10,0,2,[UIntPtr]::Zero); [Kb]::keybd_event(0x11,0,2,[UIntPtr]::Zero)
+          $gone = $false
+          foreach ($i in 1..10) { Start-Sleep 1; if (-not (Kiosk)) { $gone = $true; break } }
+          Write-Host "RESULT hotkey_closed_kiosk=$gone"
+          Write-Host "RESULT game_alive_after_hotkey=$((Up) -ne 0)"
+          cmd /c "`"$stage\STOP_GAME.bat`""
+          Start-Sleep 4
+          Write-Host "RESULT stop_bat_freed_ports=$((Up) -eq 0)"
+          $left = @(Get-Process | Where-Object { $_.ProcessName -like "LED Hoops*" })
+          Write-Host "RESULT no_leftover_processes=$($left.Count -eq 0)"
+          Write-Host "--- supervisor.log"; Get-Content "$stage\logs\supervisor.log" -ErrorAction SilentlyContinue
+
       - uses: actions/upload-artifact@v4
         with:
           name: LED-Hoops-windows-nuitka
