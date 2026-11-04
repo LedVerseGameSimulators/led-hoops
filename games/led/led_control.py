@@ -20,7 +20,8 @@ m_col = 0
 com_is_block = False
 g_has_open = False
 rect_position_arr = None
-_GAMES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Frozen (Nuitka) builds report __file__ under the install root, not games/; the supervisor exports GAMES_ROOT.
+_GAMES_DIR = os.environ.get('GAMES_ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEBUG_PARAM = os.path.join(_GAMES_DIR, 'setting', 'debug_parameter')
 
 def init_layout(layout_type, layout_row, layout_col, position_no_use):

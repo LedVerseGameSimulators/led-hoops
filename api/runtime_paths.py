@@ -33,6 +33,23 @@ def is_frozen() -> bool:
     return bool(globals().get("__compiled__"))
 
 
+def self_exe() -> list:
+    """Command that re-launches this program (used to spawn role processes)."""
+    if is_frozen():
+        argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+        if argv0 is not None and argv0.is_file() and argv0.suffix.lower() != ".py":
+            return [str(argv0)]
+        return [sys.executable]
+    return [sys.executable, "-m", "floor_launcher.entry"]
+
+
+def _frozen_exe_dir() -> Path:
+    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    if argv0 is not None and argv0.is_file() and argv0.suffix.lower() != ".py":
+        return argv0.parent
+    return Path(sys.executable).resolve().parent
+
+
 def install_root() -> Path:
     """
     Directory that contains ui/, games/, simulator/ (and bin folders when frozen).
@@ -41,7 +58,7 @@ def install_root() -> Path:
     Frozen: exe directory, or its parent when exe lives in a known onedir folder.
     """
     if is_frozen():
-        exe_dir = Path(sys.executable).resolve().parent
+        exe_dir = _frozen_exe_dir()
         if exe_dir.name in _FROZEN_BIN_DIRS:
             return exe_dir.parent
         return exe_dir
